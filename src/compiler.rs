@@ -5,12 +5,11 @@ use crate::{
     scanner::Scanner,
     token::{
         Token,
-        TokenType::{self, PLUS},
+        TokenType::{self},
     },
 };
 
 type ParseFn = fn(&mut Compiler, &mut Chunk);
-type ParseFnPtr = Option<ParseFn>;
 
 pub struct ParseRule {
     prefix: Option<ParseFn>,

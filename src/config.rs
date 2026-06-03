@@ -1,7 +1,6 @@
 //! Crate config
 
 use crate::error::{Error, Result};
-use grapple_utils::envs::{get, get_parse};
 use std::sync::OnceLock;
 
 static INSTANCE: OnceLock<Config> = OnceLock::new();

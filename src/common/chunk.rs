@@ -1,13 +1,9 @@
-use std::{
-    alloc::{alloc, dealloc, realloc, Layout},
-    ptr::NonNull,
-};
 use tracing::debug;
 
 use crate::common::{
     dynamic_array::DynamicArray,
     LineRun,
-    OpCode::{self, OP_RETURN},
+    OpCode::{self},
     Value,
 };
 
@@ -53,9 +49,7 @@ impl Chunk {
 
         for i in 0..self.code.len() {
             if let Some(&value) = self.code.get(i) {
-                unsafe {
-                    bytes.push(value);
-                }
+                bytes.push(value);
             }
         }
 
@@ -118,7 +112,7 @@ impl Chunk {
         let b2 = *self.code.get(offset + 3).unwrap() as usize;
         let constant_idx = b0 | (b1 << 8) | (b2 << 16);
 
-        print!("{:16} {:4} '", "OP_CONSTANT_LONG", constant_idx);
+        print!("{:16} {:4} '", op_code.name(), constant_idx);
 
         if let Some(value) = self.constants.get(constant_idx) {
             print!("{}", value);

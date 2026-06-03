@@ -1,5 +1,3 @@
-use std::ops::Index;
-
 use crate::define_enum_with_values;
 
 #[derive(Debug, Clone, Copy)]

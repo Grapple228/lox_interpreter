@@ -1,6 +1,5 @@
 // region:    --- Modules
 
-use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 
 // -- Modules

@@ -2,68 +2,33 @@ use std::{
     env::args,
     io::{stdin, stdout, Write},
     process::exit,
-    time::Instant,
 };
 
 use interpreter::{
-    common::{
-        Chunk,
-        OpCode::{self, OP_CONSTANT},
-        Value,
-    },
     vm::{InterpretResult, Vm},
-    Error, Result, Stack,
+    Result,
 };
-use tracing::debug;
 
 fn main() -> Result<()> {
-    interpreter::init()?;
+    if cfg!(debug_assertions) {
+        interpreter::init()?;
+    }
 
-    // const TOTAL: usize = 5;
-    // println!("Adding {TOTAL} constants...");
-
-    // let start = Instant::now();
-
-    // let mut chunk = Chunk::new();
-    // chunk.write_constant(Value::Number(2.0), 123);
-
-    // chunk.write_constant(Value::Number(4.0), 123);
-
-    // chunk.write(OpCode::OP_ADD, 123);
-
-    // chunk.write_constant(Value::Number(2.0), 123);
-
-    // chunk.write(OpCode::OP_DIVIDE, 123);
-    // chunk.write(OpCode::OP_NEGATE, 123);
-
-    // chunk.write(OpCode::OP_RETURN, 124);
-
-    // let end = start.elapsed();
-
-    // println!("Chunk created per {:?}", end);
-
-    // let start = Instant::now();
     let mut vm = Vm::new();
-    // vm.interpret(&chunk);
-    // let end = start.elapsed();
-
-    // println!("Interpreted per {:?}", end);
-
-    // debug!("Chunk: {:?}, Content: {:?}", chunk, chunk.dump_content());
 
     let args: Vec<String> = args().collect();
 
     match args.len() {
         1 => repl(&mut vm),
-        2 => run_file(&mut vm, args[1].clone()),
-        other => {
+        2 => run_file(&mut vm, &args[1]),
+        _ => {
             println!("Usage: interpreted [path]");
             exit(64);
         }
     }
 }
 
-fn run_file(vm: &mut Vm, filename: String) -> Result<()> {
+fn run_file(vm: &mut Vm, filename: &str) -> Result<()> {
     use std::fs::File;
     use std::io::Read;
 
@@ -82,9 +47,9 @@ fn run_file(vm: &mut Vm, filename: String) -> Result<()> {
     }
 
     let source_cstring = std::ffi::CString::new(source).unwrap();
-    let source_ptr = source_cstring.as_ptr();
+    let source_ptr = source_cstring.as_ptr() as *const u8;
 
-    match vm.interpret(source_ptr as *const u8) {
+    match vm.interpret(source_ptr) {
         InterpretResult::Ok => (),
         InterpretResult::CompileError => exit(65),
         InterpretResult::RuntimeError => exit(70),
@@ -98,19 +63,25 @@ fn repl(vm: &mut Vm) -> Result<()> {
     let mut stdout = stdout();
     let mut line = String::new();
 
-    writeln!(stdout, "Lox interpleter in REPL mode");
+    _ = writeln!(stdout, "Lox interpleter in REPL mode");
 
     loop {
-        write!(stdout, "> ");
-        stdout.flush();
+        _ = write!(stdout, "> ");
+        _ = stdout.flush();
 
-        let Ok(len) = stdin.read_line(&mut line) else {
+        let Ok(_) = stdin.read_line(&mut line) else {
             print!("\n");
             break;
         };
 
-        let source = line.trim_end_matches('\n');
-        vm.interpret_new(source.as_ptr());
+        let source_cstring = std::ffi::CString::new(line.as_bytes()).unwrap();
+        let source_ptr = source_cstring.as_ptr() as *const u8;
+
+        match vm.interpret(source_ptr) {
+            InterpretResult::Ok => (),
+            InterpretResult::CompileError => exit(65),
+            InterpretResult::RuntimeError => exit(70),
+        }
 
         line.clear();
     }

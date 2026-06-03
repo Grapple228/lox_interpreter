@@ -1,6 +1,5 @@
 use crate::common::Value;
 use std::{mem::MaybeUninit, ptr::NonNull};
-use tracing::debug;
 
 const STACK_MAX: usize = 256;
 

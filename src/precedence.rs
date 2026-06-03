@@ -1,4 +1,4 @@
-use crate::{compiler::Compiler, define_enum_with_values};
+use crate::define_enum_with_values;
 
 define_enum_with_values! {
     #[allow(non_camel_case_types)]

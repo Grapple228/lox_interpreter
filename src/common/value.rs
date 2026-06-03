@@ -1,8 +1,4 @@
-use std::{
-    fmt::write,
-    ops::{Add, Div, Mul, Neg, Not, Sub},
-    ptr::NonNull,
-};
+use std::ops::{Add, Div, Mul, Neg, Not, Sub};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Value {

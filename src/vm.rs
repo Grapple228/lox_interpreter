@@ -1,9 +1,6 @@
-use tracing::debug;
-
 use crate::{
     common::{Chunk, OpCode, Value, ValueResult},
     compiler::Compiler,
-    token::TokenType::STAR,
     Stack,
 };
 
@@ -223,12 +220,6 @@ impl Vm {
                 }
             }
         }
-    }
-
-    pub fn interpret_new(&mut self, source: *const u8) -> InterpretResult {
-        self.compiler.compile_old(source);
-
-        InterpretResult::Ok
     }
 
     pub fn interpret(&mut self, source: *const u8) -> InterpretResult {

@@ -1,6 +1,5 @@
 use std::{
     alloc::{alloc, dealloc, realloc, Layout},
-    mem,
     ptr::NonNull,
 };
 use tracing::debug;

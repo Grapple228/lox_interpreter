@@ -1,5 +1,3 @@
-use std::ptr::NonNull;
-
 use crate::token::{Token, TokenType};
 
 pub struct Scanner {
@@ -241,7 +239,7 @@ impl Scanner {
 
     #[inline(always)]
     fn peek(&self) -> u8 {
-        (unsafe { *self.current })
+        unsafe { *self.current }
     }
 
     #[inline(always)]
@@ -249,7 +247,7 @@ impl Scanner {
         if self.is_at_end() {
             b'\0'
         } else {
-            (unsafe { *self.current.add(1) })
+            unsafe { *self.current.add(1) }
         }
     }
 
