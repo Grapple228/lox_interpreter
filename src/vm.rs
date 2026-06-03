@@ -1,8 +1,9 @@
 use tracing::debug;
 
 use crate::{
-    common::{Chunk, OpCode, Value},
+    common::{Chunk, OpCode, Value, ValueResult},
     compiler::Compiler,
+    token::TokenType::STAR,
     Stack,
 };
 
@@ -70,6 +71,73 @@ impl Vm {
         unsafe { self.ip.offset_from(start) as usize }
     }
 
+    fn runtime_error(&mut self, stack: &mut Stack, chunk: &Chunk, message: &'static str) {
+        eprintln!("{}", message);
+
+        let instruction = self.current_offset(chunk) - 1;
+        let line = chunk.get_line(instruction).unwrap_or(0);
+        eprintln!("[line {}] in script", line);
+
+        stack.reset();
+        self.ip = std::ptr::null_mut();
+    }
+
+    fn unary_op<F>(&mut self, stack: &mut Stack, chunk: &Chunk, f: F) -> bool
+    where
+        F: FnOnce(Value) -> ValueResult,
+    {
+        let value = stack.pop();
+
+        match f(value) {
+            ValueResult::Success(value) => {
+                stack.push(value);
+                false
+            }
+            ValueResult::Error(message) => {
+                self.runtime_error(stack, chunk, message);
+                true
+            }
+        }
+    }
+
+    fn binary_op<F>(&mut self, stack: &mut Stack, chunk: &Chunk, f: F) -> bool
+    where
+        F: FnOnce(Value, Value) -> ValueResult,
+    {
+        let right = stack.pop();
+        let left = stack.pop();
+
+        match f(left, right) {
+            ValueResult::Success(value) => {
+                stack.push(value);
+                false
+            }
+            ValueResult::Error(message) => {
+                self.runtime_error(stack, chunk, message);
+                true
+            }
+        }
+    }
+
+    fn comparison_op<F>(&mut self, stack: &mut Stack, chunk: &Chunk, f: F) -> bool
+    where
+        F: FnOnce(f64, f64) -> bool,
+    {
+        let right = stack.pop();
+        let left = stack.pop();
+
+        match (left, right) {
+            (Value::Number(a), Value::Number(b)) => {
+                stack.push(Value::Bool(f(a, b)));
+                false
+            }
+            _ => {
+                self.runtime_error(stack, chunk, "Operands must be numbers.");
+                true
+            }
+        }
+    }
+
     fn run(&mut self, stack: &mut Stack, chunk: &Chunk) -> InterpretResult {
         self.ip = chunk.get_code_ptr();
 
@@ -84,6 +152,20 @@ impl Vm {
             };
 
             match op {
+                OpCode::OP_NIL => {
+                    stack.push(Value::Nil);
+                }
+                OpCode::OP_TRUE => {
+                    stack.push(Value::Bool(true));
+                }
+                OpCode::OP_FALSE => {
+                    stack.push(Value::Bool(false));
+                }
+
+                OpCode::OP_RETURN => {
+                    println!("{}", stack.pop());
+                    return InterpretResult::Ok;
+                }
                 OpCode::OP_CONSTANT => {
                     let constant = self.read_constant(chunk);
                     stack.push(constant);
@@ -92,33 +174,52 @@ impl Vm {
                     let constant = self.read_constant_long(chunk);
                     stack.push(constant);
                 }
-                OpCode::OP_RETURN => {
-                    println!("{}", stack.pop());
-                    return InterpretResult::Ok;
+
+                OpCode::OP_NOT => {
+                    if self.unary_op(stack, chunk, |a| !a) {
+                        return InterpretResult::RuntimeError;
+                    }
                 }
                 OpCode::OP_NEGATE => {
-                    let value = stack.pop();
-                    stack.push(-value);
+                    if self.unary_op(stack, chunk, |a| -a) {
+                        return InterpretResult::RuntimeError;
+                    }
                 }
                 OpCode::OP_ADD => {
-                    let right = stack.pop();
-                    let left = stack.pop();
-                    stack.push(left + right);
+                    if self.binary_op(stack, chunk, |a, b| a + b) {
+                        return InterpretResult::RuntimeError;
+                    }
                 }
                 OpCode::OP_SUBSTRACT => {
-                    let right = stack.pop();
-                    let left = stack.pop();
-                    stack.push(left - right);
+                    if self.binary_op(stack, chunk, |a, b| a - b) {
+                        return InterpretResult::RuntimeError;
+                    }
                 }
                 OpCode::OP_MULTIPLY => {
-                    let right = stack.pop();
-                    let left = stack.pop();
-                    stack.push(left * right);
+                    if self.binary_op(stack, chunk, |a, b| a * b) {
+                        return InterpretResult::RuntimeError;
+                    }
                 }
                 OpCode::OP_DIVIDE => {
+                    if self.binary_op(stack, chunk, |a, b| a / b) {
+                        return InterpretResult::RuntimeError;
+                    }
+                }
+                OpCode::OP_EQUAL => {
                     let right = stack.pop();
                     let left = stack.pop();
-                    stack.push(left / right);
+
+                    stack.push(Value::Bool(left == right));
+                }
+                OpCode::OP_GREATER => {
+                    if self.comparison_op(stack, chunk, |a, b| a > b) {
+                        return InterpretResult::RuntimeError;
+                    }
+                }
+                OpCode::OP_LESS => {
+                    if self.comparison_op(stack, chunk, |a, b| a < b) {
+                        return InterpretResult::RuntimeError;
+                    }
                 }
             }
         }

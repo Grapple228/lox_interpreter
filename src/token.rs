@@ -43,14 +43,6 @@ impl Token {
     }
 }
 
-impl Index<u8> for TokenType {
-    type Output = u8;
-
-    fn index(&self, index: u8) -> &Self::Output {
-        todo!()
-    }
-}
-
 define_enum_with_values! {
     #[allow(non_camel_case_types)]
     pub enum TokenType {

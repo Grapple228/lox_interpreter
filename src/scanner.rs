@@ -25,6 +25,11 @@ impl Scanner {
         self.skip_whitespace();
         self.start = self.current;
 
+        if self.is_at_end() {
+            // ← проверяем ДО advance
+            return self.make_token(TokenType::EOF);
+        }
+
         let c = self.advance();
 
         if Self::is_alpha(c) {
@@ -90,13 +95,7 @@ impl Scanner {
 
             b'"' => self.string(),
 
-            other => {
-                if self.is_at_end() {
-                    return self.make_token(TokenType::EOF);
-                };
-
-                self.error_token("Unexpected character.")
-            }
+            _ => self.error_token("Unexpected character."),
         }
     }
 

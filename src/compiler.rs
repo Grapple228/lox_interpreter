@@ -76,14 +76,14 @@ const RULES: [ParseRule; 40] = [
         precedence: Precedence::FACTOR,
     }, // STAR
     ParseRule {
-        prefix: None,
+        prefix: Some(Compiler::unary),
         infix: None,
         precedence: Precedence::NONE,
     }, // BANG
     ParseRule {
         prefix: None,
-        infix: None,
-        precedence: Precedence::NONE,
+        infix: Some(Compiler::binary),
+        precedence: Precedence::EQUALITY,
     }, // BANG_EQUAL
     ParseRule {
         prefix: None,
@@ -92,28 +92,28 @@ const RULES: [ParseRule; 40] = [
     }, // EQUAL
     ParseRule {
         prefix: None,
-        infix: None,
-        precedence: Precedence::NONE,
+        infix: Some(Compiler::binary),
+        precedence: Precedence::EQUALITY,
     }, // EQUAL_EQUAL
     ParseRule {
         prefix: None,
-        infix: None,
-        precedence: Precedence::NONE,
+        infix: Some(Compiler::binary),
+        precedence: Precedence::COMPARISON,
     }, // GREATER
     ParseRule {
         prefix: None,
-        infix: None,
-        precedence: Precedence::NONE,
+        infix: Some(Compiler::binary),
+        precedence: Precedence::COMPARISON,
     }, // GREATER_EQUAL
     ParseRule {
         prefix: None,
-        infix: None,
-        precedence: Precedence::NONE,
+        infix: Some(Compiler::binary),
+        precedence: Precedence::COMPARISON,
     }, // LESS
     ParseRule {
         prefix: None,
-        infix: None,
-        precedence: Precedence::NONE,
+        infix: Some(Compiler::binary),
+        precedence: Precedence::COMPARISON,
     }, // LESS_EQUAL
     ParseRule {
         prefix: None,
@@ -146,7 +146,7 @@ const RULES: [ParseRule; 40] = [
         precedence: Precedence::NONE,
     }, // ELSE
     ParseRule {
-        prefix: None,
+        prefix: Some(Compiler::literal),
         infix: None,
         precedence: Precedence::NONE,
     }, // FALSE
@@ -166,7 +166,7 @@ const RULES: [ParseRule; 40] = [
         precedence: Precedence::NONE,
     }, // IF
     ParseRule {
-        prefix: None,
+        prefix: Some(Compiler::literal),
         infix: None,
         precedence: Precedence::NONE,
     }, // NIL
@@ -196,7 +196,7 @@ const RULES: [ParseRule; 40] = [
         precedence: Precedence::NONE,
     }, // THIS
     ParseRule {
-        prefix: None,
+        prefix: Some(Compiler::literal),
         infix: None,
         precedence: Precedence::NONE,
     }, // TRUE
@@ -376,10 +376,26 @@ impl Compiler {
         self.parse_precedence(chunk, rule.precedence.next());
 
         match operator_type {
+            // BASIC OPS
             TokenType::PLUS => self.emit_byte(chunk, OpCode::OP_ADD as u8),
             TokenType::MINUS => self.emit_byte(chunk, OpCode::OP_SUBSTRACT as u8),
             TokenType::STAR => self.emit_byte(chunk, OpCode::OP_MULTIPLY as u8),
             TokenType::SLASH => self.emit_byte(chunk, OpCode::OP_DIVIDE as u8),
+
+            // EQUALITY
+            TokenType::BANG_EQUAL => {
+                self.emit_bytes(chunk, OpCode::OP_EQUAL as u8, OpCode::OP_NOT as u8)
+            }
+            TokenType::EQUAL_EQUAL => self.emit_byte(chunk, OpCode::OP_EQUAL as u8),
+            TokenType::GREATER => self.emit_byte(chunk, OpCode::OP_GREATER as u8),
+            TokenType::GREATER_EQUAL => {
+                self.emit_bytes(chunk, OpCode::OP_LESS as u8, OpCode::OP_NOT as u8)
+            }
+            TokenType::LESS => self.emit_byte(chunk, OpCode::OP_LESS as u8),
+            TokenType::LESS_EQUAL => {
+                self.emit_bytes(chunk, OpCode::OP_GREATER as u8, OpCode::OP_NOT as u8)
+            }
+
             _ => unreachable!("Should not reach here"),
         }
     }
@@ -395,6 +411,9 @@ impl Compiler {
             TokenType::MINUS => {
                 self.emit_byte(chunk, OpCode::OP_NEGATE as u8);
             }
+            TokenType::BANG => {
+                self.emit_byte(chunk, OpCode::OP_NOT as u8);
+            }
             _ => unreachable!("Should not reach here"),
         }
     }
@@ -402,6 +421,21 @@ impl Compiler {
     fn grouping(&mut self, chunk: &mut Chunk) {
         self.expression(chunk);
         self.consume(TokenType::RIGHT_PAREN, "Expect ')' after expression");
+    }
+
+    fn literal(&mut self, chunk: &mut Chunk) {
+        match self.parser.previous.typ {
+            TokenType::FALSE => {
+                self.emit_byte(chunk, OpCode::OP_FALSE as u8);
+            }
+            TokenType::TRUE => {
+                self.emit_byte(chunk, OpCode::OP_TRUE as u8);
+            }
+            TokenType::NIL => {
+                self.emit_byte(chunk, OpCode::OP_NIL as u8);
+            }
+            _ => unreachable!("Should not reach here"),
+        }
     }
 
     fn number(&mut self, chunk: &mut Chunk) {

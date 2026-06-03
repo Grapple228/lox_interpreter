@@ -101,12 +101,7 @@ impl Chunk {
         match op_code {
             OpCode::OP_CONSTANT_LONG => self.constant_long_instruction(op_code, offset),
             OpCode::OP_CONSTANT => self.constant_instruction(op_code, offset),
-            OpCode::OP_RETURN => Self::simple_instruction(op_code, offset),
-            OpCode::OP_NEGATE => Self::simple_instruction(op_code, offset),
-            OpCode::OP_ADD => Self::simple_instruction(op_code, offset),
-            OpCode::OP_SUBSTRACT => Self::simple_instruction(op_code, offset),
-            OpCode::OP_MULTIPLY => Self::simple_instruction(op_code, offset),
-            OpCode::OP_DIVIDE => Self::simple_instruction(op_code, offset),
+            _ => Self::simple_instruction(op_code, offset),
         }
     }
 
