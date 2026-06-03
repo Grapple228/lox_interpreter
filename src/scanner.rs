@@ -5,7 +5,7 @@ use crate::token::{Token, TokenType};
 pub struct Scanner {
     start: *const u8,
     current: *const u8,
-    line: u32,
+    line: usize,
 }
 
 impl Scanner {
@@ -15,6 +15,10 @@ impl Scanner {
             current: source,
             line: 1,
         }
+    }
+
+    pub fn line(&self) -> usize {
+        self.line
     }
 
     pub fn scan_token(&mut self) -> Token {

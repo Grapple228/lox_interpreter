@@ -84,7 +84,7 @@ fn run_file(vm: &mut Vm, filename: String) -> Result<()> {
     let source_cstring = std::ffi::CString::new(source).unwrap();
     let source_ptr = source_cstring.as_ptr();
 
-    match vm.interpret_new(source_ptr as *const u8) {
+    match vm.interpret(source_ptr as *const u8) {
         InterpretResult::Ok => (),
         InterpretResult::CompileError => exit(65),
         InterpretResult::RuntimeError => exit(70),

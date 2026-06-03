@@ -6,6 +6,7 @@ use tracing_subscriber::EnvFilter;
 // -- Modules
 pub mod common;
 pub mod compiler;
+pub mod parser;
 pub mod scanner;
 pub mod token;
 pub mod vm;
@@ -13,6 +14,7 @@ pub mod vm;
 mod config;
 mod error;
 mod macros;
+mod precedence;
 mod stack;
 
 // -- Flatten

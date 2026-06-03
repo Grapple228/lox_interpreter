@@ -1,10 +1,54 @@
+use std::ops::Index;
+
 use crate::define_enum_with_values;
 
+#[derive(Debug, Clone, Copy)]
 pub struct Token {
     pub typ: TokenType,
     pub start: *const u8,
     pub length: usize,
-    pub line: u32,
+    pub line: usize,
+}
+
+impl Token {
+    pub fn as_f64(&self) -> Option<f64> {
+        if self.typ != TokenType::NUMBER {
+            return None;
+        }
+
+        let mut result = 0.0;
+        let mut decimal_places = 0.0;
+        let mut is_fraction = false;
+
+        unsafe {
+            for i in 0..self.length {
+                let c = *self.start.add(i);
+                match c {
+                    b'0'..=b'9' => {
+                        let digit = (c - b'0') as f64;
+                        if is_fraction {
+                            decimal_places += 1.0;
+                            result += digit / (10.0_f64.powi(decimal_places as i32));
+                        } else {
+                            result = result * 10.0 + digit;
+                        }
+                    }
+                    b'.' => is_fraction = true,
+                    _ => return None,
+                }
+            }
+        }
+
+        Some(result)
+    }
+}
+
+impl Index<u8> for TokenType {
+    type Output = u8;
+
+    fn index(&self, index: u8) -> &Self::Output {
+        todo!()
+    }
 }
 
 define_enum_with_values! {

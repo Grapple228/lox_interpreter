@@ -22,19 +22,17 @@ impl InterpretResult {
     }
 }
 
-pub struct Vm<'a> {
-    chunk: Option<&'a Chunk>,
+pub struct Vm {
     ip: *const u8,
 
     compiler: Compiler,
 }
 
-impl<'a> Vm<'a> {
+impl Vm {
     pub fn new() -> Self {
         Self {
-            chunk: None,
             ip: std::ptr::null(),
-            compiler: Compiler,
+            compiler: Compiler::new(),
         }
     }
 
@@ -50,14 +48,12 @@ impl<'a> Vm<'a> {
         }
     }
 
-    fn read_constant(&mut self) -> Value {
-        let chunk = self.chunk.expect("Chunk should exist at this point");
+    fn read_constant(&mut self, chunk: &Chunk) -> Value {
         let idx = self.read_byte() as usize;
         *chunk.get_constant(idx).expect("Constant not found")
     }
 
-    fn read_constant_long(&mut self) -> Value {
-        let chunk = self.chunk.expect("Chunk should exist");
+    fn read_constant_long(&mut self, chunk: &Chunk) -> Value {
         let b0 = self.read_byte() as usize;
         let b1 = self.read_byte() as usize;
         let b2 = self.read_byte() as usize;
@@ -65,9 +61,7 @@ impl<'a> Vm<'a> {
         *chunk.get_constant(idx).expect("Constant not found")
     }
 
-    fn current_offset(&self) -> usize {
-        let chunk = self.chunk.expect("Chunk should exist");
-
+    fn current_offset(&self, chunk: &Chunk) -> usize {
         let start = chunk.get_code_ptr();
         if start.is_null() || self.ip.is_null() {
             return 0;
@@ -76,13 +70,13 @@ impl<'a> Vm<'a> {
         unsafe { self.ip.offset_from(start) as usize }
     }
 
-    fn run(&mut self, stack: &mut Stack) -> InterpretResult {
+    fn run(&mut self, stack: &mut Stack, chunk: &Chunk) -> InterpretResult {
+        self.ip = chunk.get_code_ptr();
+
         loop {
             if cfg!(debug_assertions) {
                 stack.debug_content();
-
-                let chunk = self.chunk.expect("Chunk should exist");
-                chunk.disassemble_unstruction(self.current_offset());
+                chunk.disassemble_unstruction(self.current_offset(chunk));
             }
 
             let Some(op) = OpCode::from_byte(self.read_byte()) else {
@@ -91,11 +85,11 @@ impl<'a> Vm<'a> {
 
             match op {
                 OpCode::OP_CONSTANT => {
-                    let constant = self.read_constant();
+                    let constant = self.read_constant(chunk);
                     stack.push(constant);
                 }
                 OpCode::OP_CONSTANT_LONG => {
-                    let constant = self.read_constant_long();
+                    let constant = self.read_constant_long(chunk);
                     stack.push(constant);
                 }
                 OpCode::OP_RETURN => {
@@ -131,21 +125,26 @@ impl<'a> Vm<'a> {
     }
 
     pub fn interpret_new(&mut self, source: *const u8) -> InterpretResult {
-        self.compiler.compile(source);
+        self.compiler.compile_old(source);
 
         InterpretResult::Ok
     }
 
-    pub fn interpret(&mut self, chunk: &'a Chunk) -> InterpretResult {
-        self.chunk = Some(chunk);
-        self.ip = chunk.get_code_ptr();
+    pub fn interpret(&mut self, source: *const u8) -> InterpretResult {
+        let mut chunk = Chunk::new();
+
+        if !self.compiler.compile(source, &mut chunk) {
+            return InterpretResult::CompileError;
+        };
 
         let mut stack = Stack::new();
 
-        self.run(&mut stack)
+        let result = self.run(&mut stack, &chunk);
+
+        result
     }
 }
 
-impl<'a> Drop for Vm<'a> {
+impl Drop for Vm {
     fn drop(&mut self) {}
 }
