@@ -1,19 +1,12 @@
 //! Main Crate Error
 
-use derive_more::derive::From;
-
 pub type Result<T> = core::result::Result<T, Error>;
 
-#[derive(Debug, From)]
+#[derive(Debug)]
 pub enum Error {
     // -- Config
     ConfigAlreadyInitialized,
-
     // -- Modules
-
-    // -- Externals
-    #[from]
-    Io(std::io::Error), // as example
 }
 
 // region:    --- Error Boilerplate

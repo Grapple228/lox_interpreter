@@ -13,18 +13,9 @@ repository = "https://github.com/grapple228/interpreter.git"
 unused = { level = "allow", priority = -1 } # For exploratory dev.
 
 [dependencies]
-# Async
-# tokio = { version = "1", features = ["full"] }
 # Tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-#Other
-derive_more = {version = "1", features = ["from"] }
-grapple_utils = { version = "0.2.0", default-features = false, features = ["envs"] }
-bytes = "1.11.1"
-
-[dev-dependencies]
-rand = "0.8"
 
 [[bench]]
 name = "scanner_bench"

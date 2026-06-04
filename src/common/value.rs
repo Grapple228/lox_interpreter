@@ -1,4 +1,4 @@
-use crate::common::object::{objects_equal, Obj};
+use crate::common::object::Obj;
 use std::ops::{Div, Mul, Neg, Not, Sub};
 
 #[derive(Debug, Clone, Copy)]
@@ -22,6 +22,10 @@ impl Value {
 
     pub const fn is_falsey(&self) -> bool {
         !self.is_truthy()
+    }
+
+    pub fn is_nil(&self) -> bool {
+        matches!(self, Value::Nil)
     }
 }
 
@@ -65,7 +69,13 @@ impl PartialEq for Value {
             (Self::Nil, Self::Nil) => true,
             (Self::Bool(b1), Self::Bool(b2)) => b1 == b2,
             (Self::Number(n1), Self::Number(n2)) => n1 == n2,
-            (Self::Obj(a), Self::Obj(b)) => objects_equal(*a, *b),
+            (Self::Obj(a), Self::Obj(b)) => {
+                if a.is_null() || b.is_null() {
+                    return false;
+                }
+
+                return a == b;
+            }
             _ => false,
         }
     }

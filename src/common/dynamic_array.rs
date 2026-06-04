@@ -4,6 +4,8 @@ use std::{
 };
 use tracing::debug;
 
+use crate::common::utils;
+
 pub struct DynamicArray<T> {
     count: usize,
     capacity: usize,
@@ -53,14 +55,6 @@ impl<T> DynamicArray<T> {
         }
     }
 
-    const fn grow_capacity(capacity: usize) -> usize {
-        if capacity < 8 {
-            8
-        } else {
-            capacity * 2
-        }
-    }
-
     fn grow_array(ptr: Option<NonNull<T>>, old_size: usize, new_size: usize) -> Option<NonNull<T>> {
         debug!("Grow array from {} to {}", old_size, new_size);
 
@@ -78,7 +72,6 @@ impl<T> DynamicArray<T> {
                 } else {
                     let old_layout = Layout::array::<T>(old_size).unwrap();
                     let ptr_u8 = old_ptr.as_ptr() as *mut u8;
-                    // ИСПРАВЛЕНИЕ ЗДЕСЬ: используем new_layout.size(), не new_size
                     let new_ptr_u8 = unsafe { realloc(ptr_u8, old_layout, new_layout.size()) };
                     if new_ptr_u8.is_null() {
                         panic!("Memory reallocation failed");
@@ -103,7 +96,7 @@ impl<T> DynamicArray<T> {
 
         if self.capacity < self.count + 1 {
             let old_capacity = self.capacity;
-            self.capacity = Self::grow_capacity(old_capacity);
+            self.capacity = utils::grow_capacity(old_capacity);
             self.values = Self::grow_array(self.values, old_capacity, self.capacity);
         }
 

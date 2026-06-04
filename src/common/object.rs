@@ -34,16 +34,25 @@ impl Obj {
 pub struct ObjString {
     obj: Obj,
     length: usize,
+    hash: u32,
     // chars идёт сразу после структуры в памяти (flexible array member)
 }
 
 impl ObjString {
-    fn chars_ptr(ptr: *const ObjString) -> *mut u8 {
+    pub fn chars_ptr(ptr: *const ObjString) -> *mut u8 {
         unsafe { (ptr as *mut u8).add(size_of::<ObjString>()) }
     }
 
     fn as_chars_ptr(&self) -> *mut u8 {
         Self::chars_ptr(self as *const Self)
+    }
+
+    pub fn length(&self) -> usize {
+        self.length
+    }
+
+    pub fn hash(&self) -> u32 {
+        self.hash
     }
 
     pub fn as_str(&self) -> &str {
@@ -101,37 +110,8 @@ impl Value {
     }
 }
 
-pub fn objects_equal(a: *mut Obj, b: *mut Obj) -> bool {
-    if a.is_null() || b.is_null() {
-        return false;
-    }
-
-    unsafe {
-        let a_type = (*a).typ;
-        let b_type = (*b).typ;
-
-        // Только строки поддерживают value equality
-        if a_type != ObjType::String || b_type != ObjType::String {
-            return false;
-        }
-
-        let a_str = a as *mut ObjString;
-        let b_str = b as *mut ObjString;
-
-        if (*a_str).length != (*b_str).length {
-            return false;
-        }
-
-        // Сравнение содержимого строк
-        let a_slice = std::slice::from_raw_parts(ObjString::chars_ptr(a_str), (*a_str).length);
-        let b_slice = std::slice::from_raw_parts(ObjString::chars_ptr(b_str), (*b_str).length);
-
-        a_slice == b_slice
-    }
-}
-
 impl Vm {
-    pub fn copy_string(&mut self, chars: *const u8, length: usize) -> *mut ObjString {
+    fn allocate_string(&mut self, length: usize) -> *mut ObjString {
         let total_size = size_of::<ObjString>() + length + 1;
         let layout = Layout::from_size_align(total_size, align_of::<ObjString>()).unwrap();
         let ptr = unsafe { alloc(layout) } as *mut ObjString;
@@ -143,18 +123,76 @@ impl Vm {
             (*ptr).obj.next = self.objects;
             self.objects = &mut (*ptr).obj;
             (*ptr).length = length;
-
-            let chars_ptr = ObjString::chars_ptr(ptr);
-            std::ptr::copy_nonoverlapping(chars, chars_ptr, length);
-            *chars_ptr.add(length) = 0;
-
-            debug!(
-                "allocated object of type string and size {}, total: {} bytes",
-                total_size, self.bytes_allocated
-            );
-        }
+            (*ptr).hash = 0;
+        };
 
         ptr
+    }
+
+    fn hash_string(key: *const u8, length: usize) -> u32 {
+        let mut hash: u32 = 2166136261; // FNV offset basis
+
+        for i in 0..length {
+            unsafe {
+                hash ^= *key.add(i) as u32;
+                hash = hash.wrapping_mul(16777619); // FNV prime
+            }
+        }
+
+        hash
+    }
+
+    pub fn take_string(&mut self, chars: *mut u8, length: usize) -> *mut ObjString {
+        let hash = Self::hash_string(chars, length);
+
+        // Проверяем, нет ли уже такой строки
+        let existing = self.strings.find_string(chars, length, hash);
+        if !existing.is_null() {
+            // Освобождаем буфер, возвращаем существующую
+            unsafe {
+                std::alloc::dealloc(
+                    chars,
+                    std::alloc::Layout::from_size_align(length + 1, 1).unwrap(),
+                );
+            }
+            return existing;
+        }
+
+        // Создаём новую строку
+        let total_size = size_of::<ObjString>() + length + 1;
+        let layout = Layout::from_size_align(total_size, align_of::<ObjString>()).unwrap();
+        let ptr = unsafe { alloc(layout) } as *mut ObjString;
+
+        self.bytes_allocated += total_size;
+
+        unsafe {
+            (*ptr).obj.typ = ObjType::String;
+            (*ptr).obj.next = self.objects;
+            self.objects = &mut (*ptr).obj;
+            (*ptr).length = length;
+            (*ptr).hash = hash;
+
+            let dest = ObjString::chars_ptr(ptr);
+            std::ptr::copy_nonoverlapping(chars, dest, length);
+            *dest.add(length) = 0;
+        }
+
+        // Добавляем в таблицу интернирования
+        self.strings.set(ptr, Value::Nil);
+
+        ptr
+    }
+
+    pub fn copy_string(&mut self, chars: *const u8, length: usize) -> *mut ObjString {
+        let heap_chars = unsafe {
+            let ptr =
+                std::alloc::alloc(std::alloc::Layout::from_size_align(length + 1, 1).unwrap());
+            std::ptr::copy_nonoverlapping(chars, ptr, length);
+            *ptr.add(length) = 0;
+            ptr
+        };
+
+        self.take_string(heap_chars, length)
     }
 
     pub fn concatenate_strings(
@@ -162,40 +200,22 @@ impl Vm {
         left: *mut ObjString,
         right: *mut ObjString,
     ) -> *mut ObjString {
-        if left.is_null() || right.is_null() {
-            panic!("Cannot concatenate null strings");
-        }
-
         unsafe {
             let left_len = (*left).length;
             let right_len = (*right).length;
             let total_len = left_len + right_len;
 
-            let total_size = size_of::<ObjString>() + total_len + 1;
-            let layout = Layout::from_size_align(total_size, align_of::<ObjString>()).unwrap();
-            let ptr = alloc(layout) as *mut ObjString;
+            let chars =
+                std::alloc::alloc(std::alloc::Layout::from_size_align(total_len + 1, 1).unwrap());
 
-            self.bytes_allocated += total_size;
-
-            (*ptr).obj.typ = ObjType::String;
-            (*ptr).obj.next = self.objects;
-            self.objects = &mut (*ptr).obj;
-            (*ptr).length = total_len;
-
-            let chars_ptr = ObjString::chars_ptr(ptr);
             let left_chars = ObjString::chars_ptr(left);
             let right_chars = ObjString::chars_ptr(right);
 
-            std::ptr::copy_nonoverlapping(left_chars, chars_ptr, left_len);
-            std::ptr::copy_nonoverlapping(right_chars, chars_ptr.add(left_len), right_len);
-            *chars_ptr.add(total_len) = 0;
+            std::ptr::copy_nonoverlapping(left_chars, chars, left_len);
+            std::ptr::copy_nonoverlapping(right_chars, chars.add(left_len), right_len);
+            *chars.add(total_len) = 0;
 
-            debug!(
-                "allocated object of type string and size {}, total: {} bytes",
-                total_size, self.bytes_allocated
-            );
-
-            ptr
+            self.take_string(chars, total_len)
         }
     }
 
@@ -244,6 +264,8 @@ impl Vm {
     }
 
     pub fn free_objects(&mut self) {
+        self.strings.free();
+
         let mut obj = self.objects;
 
         while !obj.is_null() {

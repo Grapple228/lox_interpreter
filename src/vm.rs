@@ -4,6 +4,7 @@ use crate::{
         Chunk, OpCode, Value, ValueResult,
     },
     compiler::Compiler,
+    table::Table,
     Stack,
 };
 
@@ -28,6 +29,8 @@ pub struct Vm {
 
     pub objects: *mut Obj,
     pub bytes_allocated: usize,
+
+    pub strings: Table,
 }
 
 impl Vm {
@@ -36,6 +39,8 @@ impl Vm {
             ip: std::ptr::null(),
             objects: std::ptr::null_mut(),
             bytes_allocated: 0,
+
+            strings: Table::new(),
         }
     }
 

@@ -7,6 +7,7 @@ pub mod common;
 pub mod compiler;
 pub mod parser;
 pub mod scanner;
+pub mod table;
 pub mod token;
 pub mod vm;
 

@@ -1,4 +1,5 @@
 pub mod object;
+pub mod utils;
 
 mod chunk;
 mod dynamic_array;
