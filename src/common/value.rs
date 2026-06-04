@@ -1,10 +1,12 @@
-use std::ops::{Add, Div, Mul, Neg, Not, Sub};
+use crate::common::object::{objects_equal, Obj};
+use std::ops::{Div, Mul, Neg, Not, Sub};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Value {
     Bool(bool),
     Number(f64),
     Nil,
+    Obj(*mut Obj),
 }
 
 impl Value {
@@ -29,6 +31,13 @@ impl std::fmt::Display for Value {
             Value::Bool(value) => write!(f, "{}", value),
             Value::Number(num) => write!(f, "{}", num),
             Value::Nil => write!(f, "nil"),
+            Value::Obj(obj) => {
+                if obj.is_null() {
+                    write!(f, "null")
+                } else {
+                    write!(f, "{}", unsafe { &**obj })
+                }
+            }
         }
     }
 }
@@ -56,6 +65,7 @@ impl PartialEq for Value {
             (Self::Nil, Self::Nil) => true,
             (Self::Bool(b1), Self::Bool(b2)) => b1 == b2,
             (Self::Number(n1), Self::Number(n2)) => n1 == n2,
+            (Self::Obj(a), Self::Obj(b)) => objects_equal(*a, *b),
             _ => false,
         }
     }
@@ -86,17 +96,6 @@ impl Sub for Value {
     fn sub(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a - b).into(),
-            (_, _) => ValueResult::Error("Operands must be a numbers."),
-        }
-    }
-}
-
-impl Add for Value {
-    type Output = ValueResult;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a + b).into(),
             (_, _) => ValueResult::Error("Operands must be a numbers."),
         }
     }

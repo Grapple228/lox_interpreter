@@ -1,5 +1,5 @@
 use crate::{
-    common::{Chunk, OpCode, Value},
+    common::{object::Obj, Chunk, OpCode, Value},
     parser::Parser,
     precedence::Precedence,
     scanner::Scanner,
@@ -7,9 +7,10 @@ use crate::{
         Token,
         TokenType::{self},
     },
+    vm::Vm,
 };
 
-type ParseFn = fn(&mut Compiler, &mut Chunk);
+type ParseFn = fn(&mut Compiler, &mut Vm, &mut Chunk);
 
 pub struct ParseRule {
     prefix: Option<ParseFn>,
@@ -120,7 +121,7 @@ const RULES: [ParseRule; 40] = [
         precedence: Precedence::NONE,
     }, // IDENTIFIER
     ParseRule {
-        prefix: None,
+        prefix: Some(Compiler::string),
         infix: None,
         precedence: Precedence::NONE,
     }, // STRING
@@ -343,7 +344,7 @@ impl Compiler {
         }
     }
 
-    fn parse_precedence(&mut self, chunk: &mut Chunk, precedence: Precedence) {
+    fn parse_precedence(&mut self, vm: &mut Vm, chunk: &mut Chunk, precedence: Precedence) {
         self.advance();
 
         let Some(prefix_rule) = get_rule(self.parser.previous.typ).prefix else {
@@ -351,7 +352,7 @@ impl Compiler {
             return;
         };
 
-        prefix_rule(self, chunk);
+        prefix_rule(self, vm, chunk);
 
         while precedence <= get_rule(self.parser.current.typ).precedence {
             self.advance();
@@ -361,18 +362,18 @@ impl Compiler {
                 return;
             };
 
-            infix_rule(self, chunk);
+            infix_rule(self, vm, chunk);
         }
     }
 
-    fn expression(&mut self, chunk: &mut Chunk) {
-        self.parse_precedence(chunk, Precedence::ASSIGNMENT);
+    fn expression(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        self.parse_precedence(vm, chunk, Precedence::ASSIGNMENT);
     }
 
-    fn binary(&mut self, chunk: &mut Chunk) {
+    fn binary(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
         let operator_type = self.parser.previous.typ;
         let rule = get_rule(operator_type);
-        self.parse_precedence(chunk, rule.precedence.next());
+        self.parse_precedence(vm, chunk, rule.precedence.next());
 
         match operator_type {
             // BASIC OPS
@@ -399,11 +400,11 @@ impl Compiler {
         }
     }
 
-    fn unary(&mut self, chunk: &mut Chunk) {
+    fn unary(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
         let operator_type = self.parser.previous.typ;
 
         // Compile the operand.
-        self.parse_precedence(chunk, Precedence::UNARY);
+        self.parse_precedence(vm, chunk, Precedence::UNARY);
 
         // Emit the operator instruction.
         match operator_type {
@@ -417,12 +418,12 @@ impl Compiler {
         }
     }
 
-    fn grouping(&mut self, chunk: &mut Chunk) {
-        self.expression(chunk);
+    fn grouping(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        self.expression(vm, chunk);
         self.consume(TokenType::RIGHT_PAREN, "Expect ')' after expression");
     }
 
-    fn literal(&mut self, chunk: &mut Chunk) {
+    fn literal(&mut self, _vm: &mut Vm, chunk: &mut Chunk) {
         match self.parser.previous.typ {
             TokenType::FALSE => {
                 self.emit_byte(chunk, OpCode::OP_FALSE as u8);
@@ -437,7 +438,16 @@ impl Compiler {
         }
     }
 
-    fn number(&mut self, chunk: &mut Chunk) {
+    fn string(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        let chars = unsafe { self.parser.previous.start.add(1) };
+        let length = self.parser.previous.length - 2;
+
+        let obj_string = vm.copy_string(chars, length);
+        let value = Value::Obj(obj_string as *mut Obj);
+        self.emit_constant(chunk, value);
+    }
+
+    fn number(&mut self, _vm: &mut Vm, chunk: &mut Chunk) {
         let num = self.parser.previous.as_f64().unwrap_or_else(|| {
             panic!("Invalid number at line {}", self.parser.previous.line);
         });
@@ -445,50 +455,18 @@ impl Compiler {
         self.emit_constant(chunk, Value::Number(num));
     }
 
-    pub fn compile(&mut self, source: *const u8, chunk: &mut Chunk) -> bool {
+    pub fn compile(&mut self, vm: &mut Vm, source: *const u8, chunk: &mut Chunk) -> bool {
         self.scanner = Some(Scanner::new(source));
 
         self.parser.had_error = false;
         self.parser.panic_mode = false;
 
         self.advance();
-        self.expression(chunk);
+        self.expression(vm, chunk);
         self.consume(TokenType::EOF, "Expect end of expression");
 
         self.end(chunk);
 
         !self.parser.had_error
-    }
-
-    pub fn compile_old(&mut self, source: *const u8) {
-        let mut scanner = Scanner::new(source);
-        let mut line = 0;
-
-        loop {
-            let token = scanner.scan_token();
-
-            if cfg!(debug_assertions) {
-                if token.line != line {
-                    print!("{:04} ", token.line);
-                    line = token.line;
-                } else {
-                    print!("   | ");
-                }
-
-                let lexeme = unsafe {
-                    std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                        token.start,
-                        token.length,
-                    ))
-                };
-
-                // token.typ как число (как в книге)
-                println!("{:2} '{}'", token.typ as u8, lexeme);
-            }
-
-            if token.typ == TokenType::EOF {
-                break;
-            }
-        }
     }
 }

@@ -1,5 +1,8 @@
 use crate::{
-    common::{Chunk, OpCode, Value, ValueResult},
+    common::{
+        object::{Obj, ObjString, ObjType},
+        Chunk, OpCode, Value, ValueResult,
+    },
     compiler::Compiler,
     Stack,
 };
@@ -23,14 +26,16 @@ impl InterpretResult {
 pub struct Vm {
     ip: *const u8,
 
-    compiler: Compiler,
+    pub objects: *mut Obj,
+    pub bytes_allocated: usize,
 }
 
 impl Vm {
     pub fn new() -> Self {
         Self {
             ip: std::ptr::null(),
-            compiler: Compiler::new(),
+            objects: std::ptr::null_mut(),
+            bytes_allocated: 0,
         }
     }
 
@@ -135,6 +140,21 @@ impl Vm {
         }
     }
 
+    fn add_strings(&mut self, a: *mut Obj, b: *mut Obj) -> Option<Value> {
+        unsafe {
+            if a.is_null() || b.is_null() {
+                return None;
+            }
+            if (*a).typ() != ObjType::String || (*b).typ() != ObjType::String {
+                return None;
+            }
+            let a_str = a as *mut ObjString;
+            let b_str = b as *mut ObjString;
+            let result = self.concatenate_strings(a_str, b_str);
+            Some(Value::Obj(result as *mut Obj))
+        }
+    }
+
     fn run(&mut self, stack: &mut Stack, chunk: &Chunk) -> InterpretResult {
         self.ip = chunk.get_code_ptr();
 
@@ -183,8 +203,23 @@ impl Vm {
                     }
                 }
                 OpCode::OP_ADD => {
-                    if self.binary_op(stack, chunk, |a, b| a + b) {
-                        return InterpretResult::RuntimeError;
+                    const ERR_MSG: &str = "Operands must be numbers or strings.";
+                    let right = stack.pop();
+                    let left = stack.pop();
+
+                    match (left, right) {
+                        (Value::Number(a), Value::Number(b)) => stack.push(Value::Number(a + b)),
+                        (Value::Obj(a), Value::Obj(b)) => match self.add_strings(a, b) {
+                            Some(v) => stack.push(v),
+                            None => {
+                                self.runtime_error(stack, chunk, ERR_MSG);
+                                return InterpretResult::RuntimeError;
+                            }
+                        },
+                        _ => {
+                            self.runtime_error(stack, chunk, ERR_MSG);
+                            return InterpretResult::RuntimeError;
+                        }
                     }
                 }
                 OpCode::OP_SUBSTRACT => {
@@ -224,8 +259,9 @@ impl Vm {
 
     pub fn interpret(&mut self, source: *const u8) -> InterpretResult {
         let mut chunk = Chunk::new();
+        let mut compiler = Compiler::new();
 
-        if !self.compiler.compile(source, &mut chunk) {
+        if !compiler.compile(self, source, &mut chunk) {
             return InterpretResult::CompileError;
         };
 
@@ -238,5 +274,11 @@ impl Vm {
 }
 
 impl Drop for Vm {
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        self.free_objects();
+
+        if !self.ip.is_null() {
+            self.ip = std::ptr::null_mut();
+        }
+    }
 }
