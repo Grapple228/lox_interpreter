@@ -232,14 +232,14 @@ const U8_COUNT: usize = u8::MAX as usize + 1;
 #[derive(Debug, Clone, Copy)]
 struct Local {
     name: Token,
-    depth: i32,
+    depth: Option<usize>,
 }
 
 impl Local {
     fn empty() -> Self {
         Self {
             name: Token::empty(),
-            depth: 0,
+            depth: None,
         }
     }
 }
@@ -251,7 +251,7 @@ pub struct Compiler {
 
     locals: [Local; U8_COUNT],
     local_count: usize,
-    scope_depth: i32,
+    scope_depth: usize,
 }
 
 impl Compiler {
@@ -495,7 +495,13 @@ impl Compiler {
 
     fn resolve_local(&mut self, name: Token) -> Option<usize> {
         for i in (0..self.local_count).rev() {
-            if Self::identifiers_equal(name, self.locals[i].name) {
+            let local = self.locals[i];
+            if Self::identifiers_equal(name, local.name) {
+                if local.depth.is_none() {
+                    self.error("Can't read local variable in its own initializer.");
+                    return None;
+                }
+
                 return Some(i);
             }
         }
@@ -563,8 +569,13 @@ impl Compiler {
         self.define_variable(chunk, global);
     }
 
+    fn mark_initialized(&mut self) {
+        self.locals[self.local_count - 1].depth = Some(self.scope_depth);
+    }
+
     fn define_variable(&mut self, chunk: &mut Chunk, global: usize) {
         if self.scope_depth > 0 {
+            self.mark_initialized();
             return;
         }
 
@@ -597,8 +608,10 @@ impl Compiler {
         for i in (0..self.local_count).rev() {
             let local = self.locals[i];
 
-            if local.depth != -1 && local.depth < self.scope_depth {
-                break;
+            if let Some(local_depth) = local.depth {
+                if local_depth < self.scope_depth {
+                    break;
+                }
             }
 
             if Self::identifiers_equal(name, local.name) {
@@ -627,10 +640,7 @@ impl Compiler {
             return;
         }
 
-        self.locals[self.local_count] = Local {
-            name,
-            depth: self.scope_depth,
-        };
+        self.locals[self.local_count] = Local { name, depth: None };
         self.local_count += 1;
     }
 
@@ -707,16 +717,14 @@ impl Compiler {
     fn end_scope(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
         self.scope_depth -= 1;
 
-        while self.local_count > 0
-            && self
-                .locals
-                .get(self.local_count - 1)
-                .expect("Failed to get local")
-                .depth
-                > self.scope_depth
-        {
-            self.emit_byte(chunk, OpCode::OP_POP as u8);
-            self.local_count -= 1;
+        while self.local_count > 0 {
+            let local = self.locals[self.local_count - 1];
+            if local.depth.unwrap_or(0) > self.scope_depth {
+                self.emit_byte(chunk, OpCode::OP_POP as u8);
+                self.local_count -= 1;
+            } else {
+                break;
+            }
         }
     }
 
