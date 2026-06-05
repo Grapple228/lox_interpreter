@@ -3,3 +3,7 @@ var beverage = "cafe au lait";
 breakfast = "beignets with " + beverage;
 
 print breakfast;
+
+var a = 1;
+var b = a + a + a;
+print b;

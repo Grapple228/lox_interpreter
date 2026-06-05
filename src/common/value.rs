@@ -5,7 +5,9 @@ use std::ops::{Div, Mul, Neg, Not, Sub};
 pub enum Value {
     Bool(bool),
     Number(f64),
+    Index(usize),
     Nil,
+
     Obj(*mut Obj),
 }
 
@@ -35,6 +37,7 @@ impl std::fmt::Display for Value {
             Value::Bool(value) => write!(f, "{}", value),
             Value::Number(num) => write!(f, "{}", num),
             Value::Nil => write!(f, "nil"),
+            Value::Index(index) => write!(f, "{}", index),
             Value::Obj(obj) => {
                 if obj.is_null() {
                     write!(f, "null")

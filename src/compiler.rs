@@ -3,6 +3,7 @@ use crate::{
     parser::Parser,
     precedence::Precedence,
     scanner::Scanner,
+    table::Table,
     token::{
         Token,
         TokenType::{self},
@@ -229,6 +230,7 @@ fn get_rule(typ: TokenType) -> &'static ParseRule {
 pub struct Compiler {
     parser: Parser,
     scanner: Option<Scanner>,
+    vars_cache: Table,
 }
 
 impl Compiler {
@@ -236,6 +238,7 @@ impl Compiler {
         Self {
             parser: Parser::new(),
             scanner: None,
+            vars_cache: Table::new(),
         }
     }
 
@@ -296,17 +299,6 @@ impl Compiler {
                 .as_mut()
                 .expect("Scanner should be initialized at this point");
             self.parser.current = scanner.scan_token();
-
-            eprintln!(
-                "DEBUG: token = {:?}, lexeme = {}",
-                self.parser.current.typ,
-                unsafe {
-                    std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                        self.parser.current.start,
-                        self.parser.current.length,
-                    ))
-                }
-            );
 
             if self.parser.current.typ != TokenType::ERROR {
                 break;
@@ -544,10 +536,35 @@ impl Compiler {
         self.identifier_constant(vm, chunk, self.parser.previous)
     }
 
-    fn identifier_constant(&mut self, vm: &mut Vm, chunk: &mut Chunk, name: Token) -> usize {
+    fn identifier_constant_old(&mut self, vm: &mut Vm, chunk: &mut Chunk, name: Token) -> usize {
         let obj_string = vm.copy_string(name.start, name.length);
         let value = Value::Obj(obj_string as *mut Obj);
         chunk.add_constant(value)
+    }
+
+    fn identifier_constant(&mut self, vm: &mut Vm, chunk: &mut Chunk, name: Token) -> usize {
+        let obj_string = vm.copy_string(name.start, name.length);
+
+        // Check if exists in cache
+        let mut index = Value::Nil;
+        if self.vars_cache.get(obj_string, &mut index) {
+            tracing::debug!("Existing constant identifier");
+
+            if let Some(index_num) = index.as_index() {
+                return index_num;
+            }
+        }
+
+        tracing::debug!("Not existing constant identifier");
+
+        // Создаем новую константу
+        let value = Value::Obj(obj_string as *mut Obj);
+        let idx = chunk.add_constant(value);
+
+        // Сохраняем в кэш
+        self.vars_cache.set(obj_string, Value::Index(idx));
+
+        idx
     }
 
     fn synchronize(&mut self, vm: &mut Vm, chunk: &mut Chunk) {

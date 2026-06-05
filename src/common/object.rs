@@ -94,6 +94,22 @@ impl Value {
         }
     }
 
+    pub fn as_index(&self) -> Option<usize> {
+        if let Value::Index(num) = self {
+            Some(*num)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_number(&self) -> Option<f64> {
+        if let Value::Number(num) = self {
+            Some(*num)
+        } else {
+            None
+        }
+    }
+
     pub fn is_string(&self) -> bool {
         match &self {
             Value::Obj(ptr) if !ptr.is_null() => unsafe { (**ptr).typ == ObjType::String },
