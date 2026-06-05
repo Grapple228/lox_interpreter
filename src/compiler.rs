@@ -227,10 +227,31 @@ fn get_rule(typ: TokenType) -> &'static ParseRule {
     &RULES[typ as usize]
 }
 
+const U8_COUNT: usize = u8::MAX as usize + 1;
+
+#[derive(Debug, Clone, Copy)]
+struct Local {
+    name: Token,
+    depth: i32,
+}
+
+impl Local {
+    fn empty() -> Self {
+        Self {
+            name: Token::empty(),
+            depth: 0,
+        }
+    }
+}
+
 pub struct Compiler {
     parser: Parser,
     scanner: Option<Scanner>,
     vars_cache: Table,
+
+    locals: [Local; U8_COUNT],
+    local_count: usize,
+    scope_depth: i32,
 }
 
 impl Compiler {
@@ -239,6 +260,10 @@ impl Compiler {
             parser: Parser::new(),
             scanner: None,
             vars_cache: Table::new(),
+
+            local_count: 0,
+            scope_depth: 0,
+            locals: [Local::empty(); U8_COUNT],
         }
     }
 
@@ -468,14 +493,30 @@ impl Compiler {
         self.named_variable(vm, chunk, self.parser.previous, can_assign);
     }
 
+    fn resolve_local(&mut self, name: Token) -> Option<usize> {
+        for i in (0..self.local_count).rev() {
+            if Self::identifiers_equal(name, self.locals[i].name) {
+                return Some(i);
+            }
+        }
+
+        None
+    }
+
     fn named_variable(&mut self, vm: &mut Vm, chunk: &mut Chunk, name: Token, can_assign: bool) {
-        let arg = self.identifier_constant(vm, chunk, name);
+        let (get_op, set_op, arg) = match self.resolve_local(name) {
+            Some(arg) => (OpCode::OP_GET_LOCAL, OpCode::OP_SET_LOCAL, arg),
+            None => {
+                let arg = self.identifier_constant(vm, chunk, name);
+                (OpCode::OP_GET_GLOBAL, OpCode::OP_SET_GLOBAL, arg)
+            }
+        };
 
         if can_assign && self.matches(TokenType::EQUAL) {
             self.expression(vm, chunk);
-            self.emit_bytes(chunk, OpCode::OP_SET_GLOBAL as u8, arg as u8);
+            self.emit_bytes(chunk, set_op as u8, arg as u8);
         } else {
-            self.emit_bytes(chunk, OpCode::OP_GET_GLOBAL as u8, arg as u8);
+            self.emit_bytes(chunk, get_op as u8, arg as u8);
         }
     }
 
@@ -523,6 +564,10 @@ impl Compiler {
     }
 
     fn define_variable(&mut self, chunk: &mut Chunk, global: usize) {
+        if self.scope_depth > 0 {
+            return;
+        }
+
         self.emit_bytes(chunk, OpCode::OP_DEFINE_GLOBAL as u8, global as u8);
     }
 
@@ -533,13 +578,60 @@ impl Compiler {
         error_message: &'static str,
     ) -> usize {
         self.consume(TokenType::IDENTIFIER, error_message);
+
+        self.declare_variable();
+        if self.scope_depth > 0 {
+            return 0;
+        }
+
         self.identifier_constant(vm, chunk, self.parser.previous)
     }
 
-    fn identifier_constant_old(&mut self, vm: &mut Vm, chunk: &mut Chunk, name: Token) -> usize {
-        let obj_string = vm.copy_string(name.start, name.length);
-        let value = Value::Obj(obj_string as *mut Obj);
-        chunk.add_constant(value)
+    fn declare_variable(&mut self) {
+        if self.scope_depth == 0 {
+            return;
+        }
+
+        let name = self.parser.previous;
+
+        for i in (0..self.local_count).rev() {
+            let local = self.locals[i];
+
+            if local.depth != -1 && local.depth < self.scope_depth {
+                break;
+            }
+
+            if Self::identifiers_equal(name, local.name) {
+                self.error("Already a variable with this name in this scope.");
+            }
+        }
+
+        self.add_local(name);
+    }
+
+    fn identifiers_equal(a: Token, b: Token) -> bool {
+        if a.length != b.length {
+            return false;
+        }
+
+        // TODO replace to memcmp, like  std::ptr::copy_nonoverlapping(a.start, b.start, a.length) == 0
+        let a_slice = unsafe { std::slice::from_raw_parts(a.start, a.length) };
+        let b_slice = unsafe { std::slice::from_raw_parts(b.start, b.length) };
+
+        a_slice == b_slice
+    }
+
+    fn add_local(&mut self, name: Token) {
+        if self.local_count == U8_COUNT {
+            self.error("Too many variables in function");
+            return;
+        }
+
+        self.locals[self.local_count] = Local {
+            name,
+            depth: self.scope_depth,
+        };
+        self.local_count += 1;
     }
 
     fn identifier_constant(&mut self, vm: &mut Vm, chunk: &mut Chunk, name: Token) -> usize {
@@ -599,9 +691,41 @@ impl Compiler {
     fn statement(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
         if self.matches(TokenType::PRINT) {
             self.print_statement(vm, chunk);
+        } else if self.matches(TokenType::LEFT_BRACE) {
+            self.begin_scope(vm, chunk);
+            self.block(vm, chunk);
+            self.end_scope(vm, chunk);
         } else {
             self.expression_statement(vm, chunk);
         }
+    }
+
+    fn begin_scope(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        self.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        self.scope_depth -= 1;
+
+        while self.local_count > 0
+            && self
+                .locals
+                .get(self.local_count - 1)
+                .expect("Failed to get local")
+                .depth
+                > self.scope_depth
+        {
+            self.emit_byte(chunk, OpCode::OP_POP as u8);
+            self.local_count -= 1;
+        }
+    }
+
+    fn block(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        while !self.check(TokenType::RIGHT_BRACE) && !self.check(TokenType::EOF) {
+            self.declaration(vm, chunk);
+        }
+
+        self.consume(TokenType::RIGHT_BRACE, "Expect '}' after block.");
     }
 
     fn expression_statement(&mut self, vm: &mut Vm, chunk: &mut Chunk) {

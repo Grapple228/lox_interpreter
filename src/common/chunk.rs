@@ -98,8 +98,19 @@ impl Chunk {
             OpCode::OP_DEFINE_GLOBAL => self.constant_instruction(op_code, offset),
             OpCode::OP_GET_GLOBAL => self.constant_instruction(op_code, offset),
             OpCode::OP_SET_GLOBAL => self.constant_instruction(op_code, offset),
+            OpCode::OP_SET_LOCAL => self.byte_instruction(op_code, offset),
+            OpCode::OP_GET_LOCAL => self.byte_instruction(op_code, offset),
+
             _ => Self::simple_instruction(op_code, offset),
         }
+    }
+
+    fn byte_instruction(&self, op_code: OpCode, offset: usize) -> usize {
+        let slot = unsafe { *self.code.as_ptr().add(offset + 1) };
+
+        println!("{} {}", op_code.name(), slot);
+
+        offset + 2
     }
 
     fn simple_instruction(op_code: OpCode, offset: usize) -> usize {

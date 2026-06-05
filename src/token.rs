@@ -9,6 +9,17 @@ pub struct Token {
 }
 
 impl Token {
+    pub fn empty() -> Self {
+        Self {
+            typ: TokenType::EOF,
+            start: std::ptr::null(),
+            length: 0,
+            line: 0,
+        }
+    }
+}
+
+impl Token {
     pub fn as_f64(&self) -> Option<f64> {
         if self.typ != TokenType::NUMBER {
             return None;

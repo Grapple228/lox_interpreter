@@ -20,6 +20,22 @@ impl Stack {
         }
     }
 
+    pub fn get(&self, index: usize) -> Value {
+        unsafe {
+            let start = self.values.as_ptr() as *const Value;
+            let ptr = start.add(index);
+            *ptr
+        }
+    }
+
+    pub fn set(&mut self, index: usize, value: Value) {
+        unsafe {
+            let start = self.values.as_ptr() as *mut Value;
+            let ptr = start.add(index);
+            ptr.write(value);
+        }
+    }
+
     pub fn push(&mut self, value: Value) {
         unsafe {
             let start = self.values.as_ptr() as *const Value;

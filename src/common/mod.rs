@@ -40,5 +40,7 @@ define_enum_with_values! {
         OP_DEFINE_GLOBAL = 17 => "OP_DEFINE_GLOBAL",
         OP_GET_GLOBAL = 18 => "OP_GET_GLOBAL",
         OP_SET_GLOBAL = 19 => "OP_SET_GLOBAL",
+        OP_GET_LOCAL = 20 => "OP_GET_LOCAL",
+        OP_SET_LOCAL = 21 => "OP_SET_LOCAL",
     }
 }

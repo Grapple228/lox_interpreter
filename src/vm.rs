@@ -199,6 +199,18 @@ impl Vm {
                     _ = stack.pop();
                 }
 
+                OpCode::OP_GET_LOCAL => {
+                    let slot = self.read_byte() as usize;
+                    let value = stack.get(slot);
+                    stack.push(value);
+                }
+
+                OpCode::OP_SET_LOCAL => {
+                    let slot = self.read_byte() as usize;
+                    let value = stack.peek(0);
+                    stack.set(slot, *value);
+                }
+
                 OpCode::OP_SET_GLOBAL => {
                     let Some(name_str) = self.read_string(stack, chunk) else {
                         return InterpretResult::RuntimeError;
