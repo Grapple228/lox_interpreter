@@ -95,6 +95,8 @@ impl Chunk {
         match op_code {
             OpCode::OP_CONSTANT_LONG => self.constant_long_instruction(op_code, offset),
             OpCode::OP_CONSTANT => self.constant_instruction(op_code, offset),
+            OpCode::OP_DEFINE_GLOBAL => self.constant_instruction(op_code, offset),
+            OpCode::OP_GET_GLOBAL => self.constant_instruction(op_code, offset),
             _ => Self::simple_instruction(op_code, offset),
         }
     }
@@ -161,7 +163,7 @@ impl Chunk {
         debug!("Wrote byte {:#04x} at offset {}", byte, self.code.len() - 1);
     }
 
-    pub fn write_constant(&mut self, value: Value, line: usize) {
+    pub fn write_constant(&mut self, value: Value, line: usize) -> usize {
         let index = self.add_constant(value);
 
         if index <= 255 {
@@ -181,6 +183,8 @@ impl Chunk {
                 index
             );
         }
+
+        index
     }
 
     pub fn add_constant(&mut self, value: Value) -> usize {

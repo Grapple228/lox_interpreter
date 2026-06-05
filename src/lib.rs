@@ -11,14 +11,12 @@ pub mod table;
 pub mod token;
 pub mod vm;
 
-mod config;
 mod error;
 mod macros;
 mod precedence;
 mod stack;
 
 // -- Flatten
-pub use config::config;
 pub use error::{Error, Result};
 pub use stack::Stack;
 

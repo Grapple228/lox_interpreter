@@ -116,7 +116,7 @@ const RULES: [ParseRule; 40] = [
         precedence: Precedence::COMPARISON,
     }, // LESS_EQUAL
     ParseRule {
-        prefix: None,
+        prefix: Some(Compiler::variable),
         infix: None,
         precedence: Precedence::NONE,
     }, // IDENTIFIER
@@ -296,6 +296,18 @@ impl Compiler {
                 .as_mut()
                 .expect("Scanner should be initialized at this point");
             self.parser.current = scanner.scan_token();
+
+            eprintln!(
+                "DEBUG: token = {:?}, lexeme = {}",
+                self.parser.current.typ,
+                unsafe {
+                    std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                        self.parser.current.start,
+                        self.parser.current.length,
+                    ))
+                }
+            );
+
             if self.parser.current.typ != TokenType::ERROR {
                 break;
             }
@@ -311,13 +323,13 @@ impl Compiler {
         }
     }
 
-    fn emit_constant(&mut self, chunk: &mut Chunk, value: Value) {
+    fn emit_constant(&mut self, chunk: &mut Chunk, value: Value) -> usize {
         let line = self
             .scanner
             .as_ref()
             .expect("Scanner should be initialized at this point")
             .line();
-        chunk.write_constant(value, line);
+        chunk.write_constant(value, line)
     }
 
     fn emit_byte(&mut self, chunk: &mut Chunk, byte: u8) {
@@ -455,6 +467,127 @@ impl Compiler {
         self.emit_constant(chunk, Value::Number(num));
     }
 
+    fn variable(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        self.named_variable(vm, chunk, self.parser.previous);
+    }
+
+    fn named_variable(&mut self, vm: &mut Vm, chunk: &mut Chunk, name: Token) {
+        let arg = self.identifier_constant(vm, chunk, name);
+        self.emit_bytes(chunk, OpCode::OP_GET_GLOBAL as u8, arg as u8);
+    }
+
+    fn matches(&mut self, typ: TokenType) -> bool {
+        if !self.check(typ) {
+            return false;
+        }
+
+        self.advance();
+
+        true
+    }
+
+    fn check(&self, typ: TokenType) -> bool {
+        self.parser.current.typ == typ
+    }
+
+    fn declaration(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        if self.matches(TokenType::VAR) {
+            self.var_declaration(vm, chunk);
+        } else {
+            self.statement(vm, chunk);
+        }
+
+        if self.parser.panic_mode {
+            self.synchronize(vm, chunk);
+        }
+    }
+
+    fn var_declaration(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        let global = self.parse_variable(vm, chunk, "Expect variable name.");
+
+        if self.matches(TokenType::EQUAL) {
+            self.expression(vm, chunk);
+        } else {
+            self.emit_byte(chunk, OpCode::OP_NIL as u8);
+        }
+
+        self.consume(
+            TokenType::SEMICOLON,
+            "Expect ';' after variable declaration.",
+        );
+
+        self.define_variable(chunk, global);
+    }
+
+    fn define_variable(&mut self, chunk: &mut Chunk, global: usize) {
+        self.emit_bytes(chunk, OpCode::OP_DEFINE_GLOBAL as u8, global as u8);
+    }
+
+    fn parse_variable(
+        &mut self,
+        vm: &mut Vm,
+        chunk: &mut Chunk,
+        error_message: &'static str,
+    ) -> usize {
+        self.consume(TokenType::IDENTIFIER, error_message);
+        self.identifier_constant(vm, chunk, self.parser.previous)
+    }
+
+    fn identifier_constant(&mut self, vm: &mut Vm, chunk: &mut Chunk, name: Token) -> usize {
+        let obj_string = vm.copy_string(name.start, name.length);
+        let value = Value::Obj(obj_string as *mut Obj);
+        chunk.add_constant(value)
+    }
+
+    fn synchronize(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        self.parser.panic_mode = false;
+
+        while self.parser.current.typ != TokenType::EOF {
+            if self.parser.previous.typ == TokenType::SEMICOLON {
+                return;
+            }
+
+            match self.parser.current.typ {
+                TokenType::CLASS
+                | TokenType::FUN
+                | TokenType::VAR
+                | TokenType::FOR
+                | TokenType::IF
+                | TokenType::WHILE
+                | TokenType::PRINT
+                | TokenType::RETURN => {
+                    return;
+                }
+
+                _ => {
+                    // Nothing
+                }
+            }
+
+            self.advance();
+        }
+    }
+
+    fn statement(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        if self.matches(TokenType::PRINT) {
+            self.print_statement(vm, chunk);
+        } else {
+            self.expression_statement(vm, chunk);
+        }
+    }
+
+    fn expression_statement(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        self.expression(vm, chunk);
+        self.consume(TokenType::SEMICOLON, "Expect ';' after expression");
+        self.emit_byte(chunk, OpCode::OP_POP as u8);
+    }
+
+    fn print_statement(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        self.expression(vm, chunk);
+        self.consume(TokenType::SEMICOLON, "Expect ';' after value");
+        self.emit_byte(chunk, OpCode::OP_PRINT as u8);
+    }
+
     pub fn compile(&mut self, vm: &mut Vm, source: *const u8, chunk: &mut Chunk) -> bool {
         self.scanner = Some(Scanner::new(source));
 
@@ -462,8 +595,10 @@ impl Compiler {
         self.parser.panic_mode = false;
 
         self.advance();
-        self.expression(vm, chunk);
-        self.consume(TokenType::EOF, "Expect end of expression");
+
+        while !self.matches(TokenType::EOF) {
+            self.declaration(vm, chunk);
+        }
 
         self.end(chunk);
 

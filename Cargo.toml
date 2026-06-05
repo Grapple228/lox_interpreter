@@ -21,6 +21,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 name = "scanner_bench"
 harness = false
 
+# [profile.release]
+# strip = true           # удалить debug-символы
+# lto = true             # link-time optimization
+# opt-level = "z"        # оптимизация на размер
+# codegen-units = 1      # больше оптимизаций
+# panic = "abort"
+
 [profile.bench]
 opt-level = 3
 lto = true

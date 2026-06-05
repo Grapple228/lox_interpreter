@@ -35,5 +35,9 @@ define_enum_with_values! {
         OP_EQUAL = 12 => "OP_EQUAL",
         OP_GREATER = 13 => "OP_GREATER",
         OP_LESS = 14 => "OP_LESS",
+        OP_PRINT = 15 => "OP_PRINT",
+        OP_POP = 16 => "OP_POP",
+        OP_DEFINE_GLOBAL = 17 => "OP_DEFINE_GLOBAL",
+        OP_GET_GLOBAL = 18 => "OP_GET_GLOBAL",
     }
 }

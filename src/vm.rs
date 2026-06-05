@@ -1,3 +1,5 @@
+use tracing::debug;
+
 use crate::{
     common::{
         object::{Obj, ObjString, ObjType},
@@ -31,6 +33,7 @@ pub struct Vm {
     pub bytes_allocated: usize,
 
     pub strings: Table,
+    pub globals: Table,
 }
 
 impl Vm {
@@ -41,6 +44,7 @@ impl Vm {
             bytes_allocated: 0,
 
             strings: Table::new(),
+            globals: Table::new(),
         }
     }
 
@@ -174,6 +178,74 @@ impl Vm {
             };
 
             match op {
+                OpCode::OP_POP => {
+                    _ = stack.pop();
+                }
+
+                OpCode::OP_GET_GLOBAL => {
+                    // 1. Читаем имя переменной из констант
+                    let constant_idx = self.read_byte() as usize;
+                    let name = chunk.get_constant(constant_idx).unwrap();
+
+                    debug!("{}", name);
+
+                    // 2. Имя должно быть строкой
+                    let name_str = match *name {
+                        Value::Obj(ptr) if unsafe { (*ptr).typ() == ObjType::String } => {
+                            ptr as *mut ObjString
+                        }
+                        _ => {
+                            self.runtime_error(
+                                stack,
+                                chunk,
+                                "Global variable name must be a string.",
+                            );
+                            return InterpretResult::RuntimeError;
+                        }
+                    };
+
+                    let mut value = Value::Nil;
+
+                    if !self.globals.get(name_str, &mut value) {
+                        self.runtime_error(stack, chunk, "Undefined variable");
+                        return InterpretResult::RuntimeError;
+                    }
+
+                    debug!("{}", value);
+
+                    stack.push(value);
+                }
+
+                OpCode::OP_DEFINE_GLOBAL => {
+                    // 1. Читаем имя переменной из констант
+                    let constant_idx = self.read_byte() as usize;
+                    let name = chunk.get_constant(constant_idx).unwrap();
+
+                    // 2. Имя должно быть строкой
+                    let name_str = match *name {
+                        Value::Obj(ptr) if unsafe { (*ptr).typ() == ObjType::String } => {
+                            ptr as *mut ObjString
+                        }
+                        _ => {
+                            self.runtime_error(
+                                stack,
+                                chunk,
+                                "Global variable name must be a string.",
+                            );
+                            return InterpretResult::RuntimeError;
+                        }
+                    };
+
+                    // 3. Значение уже на стеке
+                    let value = stack.peek(0);
+
+                    // 4. Записываем в глобальную таблицу
+                    self.globals.set(name_str, *value);
+
+                    // 5. Убираем значение со стека
+                    stack.pop();
+                }
+
                 OpCode::OP_NIL => {
                     stack.push(Value::Nil);
                 }
@@ -184,10 +256,14 @@ impl Vm {
                     stack.push(Value::Bool(false));
                 }
 
-                OpCode::OP_RETURN => {
+                OpCode::OP_PRINT => {
                     println!("{}", stack.pop());
+                }
+
+                OpCode::OP_RETURN => {
                     return InterpretResult::Ok;
                 }
+
                 OpCode::OP_CONSTANT => {
                     let constant = self.read_constant(chunk);
                     stack.push(constant);
