@@ -60,6 +60,19 @@ impl Vm {
         }
     }
 
+    fn read_u16(&mut self) -> u16 {
+        unsafe {
+            if self.ip.is_null() {
+                panic!("IP is null");
+            }
+
+            let b0 = *self.ip as u16;
+            let b1 = *self.ip.add(1) as u16;
+            self.ip = self.ip.add(2);
+            (b0 << 8) | b1
+        }
+    }
+
     fn read_constant(&mut self, chunk: &Chunk) -> Value {
         let idx = self.read_byte() as usize;
         *chunk.get_constant(idx).expect("Constant not found")
@@ -195,6 +208,17 @@ impl Vm {
             };
 
             match op {
+                OpCode::OP_JUMP_IF_FALSE => {
+                    let offset = self.read_u16();
+                    if stack.peek(0).is_falsey() {
+                        self.ip = unsafe { self.ip.add(offset as usize) };
+                    }
+                }
+                OpCode::OP_JUMP => {
+                    let offset = self.read_u16();
+                    self.ip = unsafe { self.ip.add(offset as usize) };
+                }
+
                 OpCode::OP_POP => {
                     _ = stack.pop();
                 }

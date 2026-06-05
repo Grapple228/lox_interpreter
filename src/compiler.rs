@@ -363,6 +363,14 @@ impl Compiler {
         self.emit_byte(chunk, OpCode::OP_RETURN as u8);
     }
 
+    fn emit_jump(&mut self, chunk: &mut Chunk, instruction: u8) -> usize {
+        self.emit_byte(chunk, instruction);
+        self.emit_byte(chunk, 0xff);
+        self.emit_byte(chunk, 0xff);
+
+        chunk.count() - 2
+    }
+
     fn end(&mut self, chunk: &mut Chunk) {
         self.emit_return(chunk);
 
@@ -701,6 +709,8 @@ impl Compiler {
     fn statement(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
         if self.matches(TokenType::PRINT) {
             self.print_statement(vm, chunk);
+        } else if self.matches(TokenType::IF) {
+            self.if_statement(vm, chunk);
         } else if self.matches(TokenType::LEFT_BRACE) {
             self.begin_scope(vm, chunk);
             self.block(vm, chunk);
@@ -708,6 +718,39 @@ impl Compiler {
         } else {
             self.expression_statement(vm, chunk);
         }
+    }
+
+    fn if_statement(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        self.consume(TokenType::LEFT_PAREN, "Expect '(' after if.");
+        self.expression(vm, chunk);
+        self.consume(TokenType::RIGHT_PAREN, "Expect ')' after condition.");
+
+        let then_jump = self.emit_jump(chunk, OpCode::OP_JUMP_IF_FALSE as u8);
+        self.emit_byte(chunk, OpCode::OP_POP as u8);
+        self.statement(vm, chunk);
+
+        let else_jump = self.emit_jump(chunk, OpCode::OP_JUMP as u8);
+
+        self.patch_jump(chunk, then_jump);
+        self.emit_byte(chunk, OpCode::OP_POP as u8);
+
+        if self.matches(TokenType::ELSE) {
+            self.statement(vm, chunk);
+        }
+
+        self.patch_jump(chunk, else_jump);
+    }
+
+    fn patch_jump(&mut self, chunk: &mut Chunk, offset: usize) {
+        // -2 to adjust for the bytecode for the jump offset itself.
+        let jump = chunk.count() - offset - 2;
+
+        if jump > u16::MAX as usize {
+            self.error("Too much code to jump over");
+        }
+
+        chunk.code.set(offset, ((jump >> 8) & 0xff) as u8);
+        chunk.code.set(offset + 1, (jump & 0xff) as u8);
     }
 
     fn begin_scope(&mut self, vm: &mut Vm, chunk: &mut Chunk) {

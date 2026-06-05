@@ -14,6 +14,10 @@ pub struct Chunk {
 }
 
 impl Chunk {
+    pub fn count(&self) -> usize {
+        self.code.count()
+    }
+
     pub fn get_code_ptr(&self) -> *const u8 {
         self.code.as_ptr()
     }
@@ -47,7 +51,7 @@ impl Chunk {
     pub fn dump_content(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
 
-        for i in 0..self.code.len() {
+        for i in 0..self.code.count() {
             if let Some(&value) = self.code.get(i) {
                 bytes.push(value);
             }
@@ -60,7 +64,7 @@ impl Chunk {
         println!("== {name} ==");
 
         let mut offset = 0;
-        while offset < self.code.len() {
+        while offset < self.code.count() {
             offset = self.disassemble_unstruction(offset);
         }
     }
@@ -101,20 +105,40 @@ impl Chunk {
             OpCode::OP_SET_LOCAL => self.byte_instruction(op_code, offset),
             OpCode::OP_GET_LOCAL => self.byte_instruction(op_code, offset),
 
+            OpCode::OP_JUMP => self.jump_instruction(op_code, 1, offset),
+            OpCode::OP_JUMP_IF_FALSE => self.jump_instruction(op_code, 1, offset),
+
             _ => Self::simple_instruction(op_code, offset),
         }
+    }
+
+    fn jump_instruction(&self, op_code: OpCode, sign: usize, offset: usize) -> usize {
+        let jump = unsafe {
+            let b0 = *self.code.as_ptr().add(offset + 1) as u16;
+            let b1 = *self.code.as_ptr().add(offset + 2) as u16;
+            (b0 << 8) | b1
+        };
+
+        println!(
+            "{:16} {:4} -> {}",
+            op_code.name(),
+            offset,
+            offset + 3 + sign * jump as usize
+        );
+
+        offset + 3
     }
 
     fn byte_instruction(&self, op_code: OpCode, offset: usize) -> usize {
         let slot = unsafe { *self.code.as_ptr().add(offset + 1) };
 
-        println!("{} {}", op_code.name(), slot);
+        println!("{:16} {:4}", op_code.name(), slot);
 
         offset + 2
     }
 
     fn simple_instruction(op_code: OpCode, offset: usize) -> usize {
-        println!("{}", op_code.name());
+        println!("{:16}", op_code.name());
 
         offset + 1
     }
@@ -152,8 +176,8 @@ impl Chunk {
         self.code.write(byte);
 
         // RLE компрессия для line info
-        if self.lines.len() > 0 {
-            let last_index = self.lines.len() - 1;
+        if self.lines.count() > 0 {
+            let last_index = self.lines.count() - 1;
 
             if let Some(last_run) = self.lines.get_mut(last_index) {
                 if last_run.line == line {
@@ -161,7 +185,7 @@ impl Chunk {
                     debug!(
                         "Wrote byte {:#04x} at offset {} (same line, count now {})",
                         byte,
-                        self.code.len() - 1,
+                        self.code.count() - 1,
                         last_run.count
                     );
                     return;
@@ -172,7 +196,11 @@ impl Chunk {
         // Новая строка - создаём новый run
         self.lines.write(LineRun { line, count: 1 });
 
-        debug!("Wrote byte {:#04x} at offset {}", byte, self.code.len() - 1);
+        debug!(
+            "Wrote byte {:#04x} at offset {}",
+            byte,
+            self.code.count() - 1
+        );
     }
 
     pub fn write_constant(&mut self, value: Value, line: usize) -> usize {
@@ -201,7 +229,7 @@ impl Chunk {
 
     pub fn add_constant(&mut self, value: Value) -> usize {
         self.constants.write(value);
-        self.constants.len() - 1
+        self.constants.count() - 1
     }
 
     pub fn get_instruction(&self, offset: usize) -> Option<u8> {
@@ -216,7 +244,7 @@ impl Chunk {
     pub fn get_line(&self, offset: usize) -> Option<usize> {
         let mut remaining = offset;
 
-        for run in 0..self.lines.len() {
+        for run in 0..self.lines.count() {
             let line_run = self.lines.get(run).unwrap();
             if remaining < line_run.count {
                 return Some(line_run.line);
@@ -231,7 +259,7 @@ impl Chunk {
 impl std::fmt::Debug for Chunk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Chunk")
-            .field("count", &self.code.len())
+            .field("count", &self.code.count())
             .field("capacity", &self.code.capacity())
             .field("code", &"<raw pointer>")
             .finish()

@@ -126,7 +126,7 @@ impl<T> DynamicArray<T> {
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub fn count(&self) -> usize {
         self.count
     }
 
@@ -155,6 +155,20 @@ impl<T> DynamicArray<T> {
             }
         }
         result
+    }
+
+    pub fn set(&mut self, offset: usize, value: T) {
+        if offset >= self.count {
+            panic!("Index out of bounds: {} >= {}", offset, self.count);
+        }
+
+        let Some(values_ptr) = self.values.as_mut() else {
+            panic!("Dynamic array is not initialized");
+        };
+
+        unsafe {
+            values_ptr.as_ptr().add(offset).write(value);
+        }
     }
 }
 
