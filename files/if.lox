@@ -3,3 +3,29 @@ if("3" + "3" == "333") {
 } else {
     print "not equal";
 }
+
+
+if(1 == 1 and 2 == 2) {
+    print true;
+} else {
+    print false;
+}
+
+if(1 == 1 and 2 == 3) {
+    print true;
+} else {
+    print false;
+}
+
+if(1 == 1 or 2 == 3) {
+    print true;
+} else {
+    print false;
+}
+
+
+if(1 == 2 or 2 == 3) {
+    print true;
+} else {
+    print false;
+}

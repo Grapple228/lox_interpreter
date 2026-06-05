@@ -44,5 +44,6 @@ define_enum_with_values! {
         OP_SET_LOCAL = 21 => "OP_SET_LOCAL",
         OP_JUMP_IF_FALSE = 22 => "OP_JUMP_IF_FALSE",
         OP_JUMP = 23 => "OP_JUMP",
+        OP_LOOP = 24 => "OP_LOOP",
     }
 }

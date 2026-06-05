@@ -133,8 +133,8 @@ const RULES: [ParseRule; 40] = [
     }, // NUMBER
     ParseRule {
         prefix: None,
-        infix: None,
-        precedence: Precedence::NONE,
+        infix: Some(Compiler::and),
+        precedence: Precedence::AND,
     }, // AND
     ParseRule {
         prefix: None,
@@ -173,8 +173,8 @@ const RULES: [ParseRule; 40] = [
     }, // NIL
     ParseRule {
         prefix: None,
-        infix: None,
-        precedence: Precedence::NONE,
+        infix: Some(Compiler::or),
+        precedence: Precedence::OR,
     }, // OR
     ParseRule {
         prefix: None,
@@ -371,6 +371,18 @@ impl Compiler {
         chunk.count() - 2
     }
 
+    fn emit_loop(&mut self, chunk: &mut Chunk, loop_start: usize) {
+        self.emit_byte(chunk, OpCode::OP_LOOP as u8);
+
+        let offset = chunk.count() - loop_start + 2;
+        if offset > u16::MAX as usize {
+            self.error("Loop body too large.");
+        }
+
+        self.emit_byte(chunk, (offset >> 8) as u8 & 0xff);
+        self.emit_byte(chunk, offset as u8 & 0xff);
+    }
+
     fn end(&mut self, chunk: &mut Chunk) {
         self.emit_return(chunk);
 
@@ -495,6 +507,26 @@ impl Compiler {
         });
 
         self.emit_constant(chunk, Value::Number(num));
+    }
+
+    fn or(&mut self, vm: &mut Vm, chunk: &mut Chunk, can_assign: bool) {
+        let else_jump = self.emit_jump(chunk, OpCode::OP_JUMP_IF_FALSE as u8);
+        let end_jump = self.emit_jump(chunk, OpCode::OP_JUMP as u8);
+
+        self.patch_jump(chunk, else_jump);
+        self.emit_byte(chunk, OpCode::OP_POP as u8);
+
+        self.parse_precedence(vm, chunk, Precedence::OR);
+        self.patch_jump(chunk, end_jump);
+    }
+
+    fn and(&mut self, vm: &mut Vm, chunk: &mut Chunk, can_assign: bool) {
+        let end_jump = self.emit_jump(chunk, OpCode::OP_JUMP_IF_FALSE as u8);
+
+        self.emit_byte(chunk, OpCode::OP_POP as u8);
+        self.parse_precedence(vm, chunk, Precedence::AND);
+
+        self.patch_jump(chunk, end_jump);
     }
 
     fn variable(&mut self, vm: &mut Vm, chunk: &mut Chunk, can_assign: bool) {
@@ -709,8 +741,12 @@ impl Compiler {
     fn statement(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
         if self.matches(TokenType::PRINT) {
             self.print_statement(vm, chunk);
+        } else if self.matches(TokenType::FOR) {
+            self.for_statement(vm, chunk);
         } else if self.matches(TokenType::IF) {
             self.if_statement(vm, chunk);
+        } else if self.matches(TokenType::WHILE) {
+            self.while_statement(vm, chunk);
         } else if self.matches(TokenType::LEFT_BRACE) {
             self.begin_scope(vm, chunk);
             self.block(vm, chunk);
@@ -720,8 +756,76 @@ impl Compiler {
         }
     }
 
+    fn for_statement(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        self.begin_scope(vm, chunk);
+
+        self.consume(TokenType::LEFT_PAREN, "Expect '(' after 'for'.");
+
+        if self.matches(TokenType::SEMICOLON) {
+            // no initializer
+        } else if self.matches(TokenType::VAR) {
+            self.var_declaration(vm, chunk);
+        } else {
+            self.expression_statement(vm, chunk);
+        }
+
+        let mut loop_start = chunk.count();
+        let mut exit_jump = None;
+
+        if !self.matches(TokenType::SEMICOLON) {
+            self.expression(vm, chunk);
+            self.consume(TokenType::SEMICOLON, "Expect ';' after loop condition.");
+
+            // Jump out of the loop if the condition is false.
+            exit_jump = Some(self.emit_jump(chunk, OpCode::OP_JUMP_IF_FALSE as u8));
+            self.emit_byte(chunk, OpCode::OP_POP as u8);
+        }
+
+        if !self.matches(TokenType::RIGHT_PAREN) {
+            let body_jump = self.emit_jump(chunk, OpCode::OP_JUMP as u8);
+            let increment_start = chunk.count();
+
+            self.expression(vm, chunk);
+            self.emit_byte(chunk, OpCode::OP_POP as u8);
+
+            self.consume(TokenType::RIGHT_PAREN, "Expect ')' after for clauses.");
+
+            self.emit_loop(chunk, loop_start);
+            loop_start = increment_start;
+
+            self.patch_jump(chunk, body_jump);
+        }
+
+        self.statement(vm, chunk);
+        self.emit_loop(chunk, loop_start);
+
+        if let Some(exit_jump) = exit_jump {
+            self.patch_jump(chunk, exit_jump);
+            self.emit_byte(chunk, OpCode::OP_POP as u8); // Condition
+        }
+
+        self.end_scope(vm, chunk);
+    }
+
+    fn while_statement(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+        let loop_start = chunk.count();
+
+        self.consume(TokenType::LEFT_PAREN, "Expect '(' after 'while'.");
+        self.expression(vm, chunk);
+        self.consume(TokenType::RIGHT_PAREN, "Expect ')' after condition.");
+
+        let exit_jump = self.emit_jump(chunk, OpCode::OP_JUMP_IF_FALSE as u8);
+        self.emit_byte(chunk, OpCode::OP_POP as u8);
+        self.statement(vm, chunk);
+
+        self.emit_loop(chunk, loop_start);
+
+        self.patch_jump(chunk, exit_jump);
+        self.emit_byte(chunk, OpCode::OP_POP as u8);
+    }
+
     fn if_statement(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
-        self.consume(TokenType::LEFT_PAREN, "Expect '(' after if.");
+        self.consume(TokenType::LEFT_PAREN, "Expect '(' after 'if'.");
         self.expression(vm, chunk);
         self.consume(TokenType::RIGHT_PAREN, "Expect ')' after condition.");
 

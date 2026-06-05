@@ -219,6 +219,11 @@ impl Vm {
                     self.ip = unsafe { self.ip.add(offset as usize) };
                 }
 
+                OpCode::OP_LOOP => {
+                    let offset = self.read_u16();
+                    self.ip = unsafe { self.ip.sub(offset as usize) };
+                }
+
                 OpCode::OP_POP => {
                     _ = stack.pop();
                 }

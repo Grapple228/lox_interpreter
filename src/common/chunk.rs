@@ -107,12 +107,13 @@ impl Chunk {
 
             OpCode::OP_JUMP => self.jump_instruction(op_code, 1, offset),
             OpCode::OP_JUMP_IF_FALSE => self.jump_instruction(op_code, 1, offset),
+            OpCode::OP_LOOP => self.jump_instruction(op_code, -1, offset),
 
             _ => Self::simple_instruction(op_code, offset),
         }
     }
 
-    fn jump_instruction(&self, op_code: OpCode, sign: usize, offset: usize) -> usize {
+    fn jump_instruction(&self, op_code: OpCode, sign: isize, offset: usize) -> usize {
         let jump = unsafe {
             let b0 = *self.code.as_ptr().add(offset + 1) as u16;
             let b1 = *self.code.as_ptr().add(offset + 2) as u16;
@@ -123,7 +124,7 @@ impl Chunk {
             "{:16} {:4} -> {}",
             op_code.name(),
             offset,
-            offset + 3 + sign * jump as usize
+            offset as isize + 3 + (sign * jump as isize)
         );
 
         offset + 3
