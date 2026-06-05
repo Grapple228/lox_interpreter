@@ -200,7 +200,7 @@ impl Table {
         }
     }
 
-    fn delete(&mut self, key: *mut ObjString) -> bool {
+    pub fn delete(&mut self, key: *mut ObjString) -> bool {
         if self.count == 0 {
             return false;
         }

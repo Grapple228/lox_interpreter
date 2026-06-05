@@ -164,6 +164,23 @@ impl Vm {
         }
     }
 
+    fn read_string(&mut self, stack: &mut Stack, chunk: &Chunk) -> Option<*mut ObjString> {
+        // 1. Читаем имя переменной из констант
+        let constant_idx = self.read_byte() as usize;
+        let name = chunk.get_constant(constant_idx).unwrap();
+
+        // 2. Имя должно быть строкой
+        let name_str = match *name {
+            Value::Obj(ptr) if unsafe { (*ptr).typ() == ObjType::String } => ptr as *mut ObjString,
+            _ => {
+                self.runtime_error(stack, chunk, "Global variable name must be a string.");
+                return None;
+            }
+        };
+
+        Some(name_str)
+    }
+
     fn run(&mut self, stack: &mut Stack, chunk: &Chunk) -> InterpretResult {
         self.ip = chunk.get_code_ptr();
 
@@ -182,26 +199,23 @@ impl Vm {
                     _ = stack.pop();
                 }
 
+                OpCode::OP_SET_GLOBAL => {
+                    let Some(name_str) = self.read_string(stack, chunk) else {
+                        return InterpretResult::RuntimeError;
+                    };
+
+                    let value = stack.peek(0);
+
+                    if self.globals.set(name_str, *value) {
+                        self.globals.delete(name_str);
+                        self.runtime_error(stack, chunk, "Undefined variable");
+                        return InterpretResult::RuntimeError;
+                    }
+                }
+
                 OpCode::OP_GET_GLOBAL => {
-                    // 1. Читаем имя переменной из констант
-                    let constant_idx = self.read_byte() as usize;
-                    let name = chunk.get_constant(constant_idx).unwrap();
-
-                    debug!("{}", name);
-
-                    // 2. Имя должно быть строкой
-                    let name_str = match *name {
-                        Value::Obj(ptr) if unsafe { (*ptr).typ() == ObjType::String } => {
-                            ptr as *mut ObjString
-                        }
-                        _ => {
-                            self.runtime_error(
-                                stack,
-                                chunk,
-                                "Global variable name must be a string.",
-                            );
-                            return InterpretResult::RuntimeError;
-                        }
+                    let Some(name_str) = self.read_string(stack, chunk) else {
+                        return InterpretResult::RuntimeError;
                     };
 
                     let mut value = Value::Nil;
@@ -211,38 +225,18 @@ impl Vm {
                         return InterpretResult::RuntimeError;
                     }
 
-                    debug!("{}", value);
-
                     stack.push(value);
                 }
 
                 OpCode::OP_DEFINE_GLOBAL => {
-                    // 1. Читаем имя переменной из констант
-                    let constant_idx = self.read_byte() as usize;
-                    let name = chunk.get_constant(constant_idx).unwrap();
-
-                    // 2. Имя должно быть строкой
-                    let name_str = match *name {
-                        Value::Obj(ptr) if unsafe { (*ptr).typ() == ObjType::String } => {
-                            ptr as *mut ObjString
-                        }
-                        _ => {
-                            self.runtime_error(
-                                stack,
-                                chunk,
-                                "Global variable name must be a string.",
-                            );
-                            return InterpretResult::RuntimeError;
-                        }
+                    let Some(name_str) = self.read_string(stack, chunk) else {
+                        return InterpretResult::RuntimeError;
                     };
 
-                    // 3. Значение уже на стеке
                     let value = stack.peek(0);
 
-                    // 4. Записываем в глобальную таблицу
                     self.globals.set(name_str, *value);
 
-                    // 5. Убираем значение со стека
                     stack.pop();
                 }
 

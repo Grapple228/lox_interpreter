@@ -97,6 +97,7 @@ impl Chunk {
             OpCode::OP_CONSTANT => self.constant_instruction(op_code, offset),
             OpCode::OP_DEFINE_GLOBAL => self.constant_instruction(op_code, offset),
             OpCode::OP_GET_GLOBAL => self.constant_instruction(op_code, offset),
+            OpCode::OP_SET_GLOBAL => self.constant_instruction(op_code, offset),
             _ => Self::simple_instruction(op_code, offset),
         }
     }

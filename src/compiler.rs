@@ -10,7 +10,7 @@ use crate::{
     vm::Vm,
 };
 
-type ParseFn = fn(&mut Compiler, &mut Vm, &mut Chunk);
+type ParseFn = fn(&mut Compiler, &mut Vm, &mut Chunk, bool);
 
 pub struct ParseRule {
     prefix: Option<ParseFn>,
@@ -364,7 +364,8 @@ impl Compiler {
             return;
         };
 
-        prefix_rule(self, vm, chunk);
+        let can_assign = precedence <= Precedence::ASSIGNMENT;
+        prefix_rule(self, vm, chunk, can_assign);
 
         while precedence <= get_rule(self.parser.current.typ).precedence {
             self.advance();
@@ -374,7 +375,11 @@ impl Compiler {
                 return;
             };
 
-            infix_rule(self, vm, chunk);
+            infix_rule(self, vm, chunk, can_assign);
+        }
+
+        if can_assign && self.matches(TokenType::EQUAL) {
+            self.error("Invalid assignment target.");
         }
     }
 
@@ -382,7 +387,7 @@ impl Compiler {
         self.parse_precedence(vm, chunk, Precedence::ASSIGNMENT);
     }
 
-    fn binary(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+    fn binary(&mut self, vm: &mut Vm, chunk: &mut Chunk, can_assign: bool) {
         let operator_type = self.parser.previous.typ;
         let rule = get_rule(operator_type);
         self.parse_precedence(vm, chunk, rule.precedence.next());
@@ -412,7 +417,7 @@ impl Compiler {
         }
     }
 
-    fn unary(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+    fn unary(&mut self, vm: &mut Vm, chunk: &mut Chunk, can_assign: bool) {
         let operator_type = self.parser.previous.typ;
 
         // Compile the operand.
@@ -430,12 +435,12 @@ impl Compiler {
         }
     }
 
-    fn grouping(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+    fn grouping(&mut self, vm: &mut Vm, chunk: &mut Chunk, can_assign: bool) {
         self.expression(vm, chunk);
         self.consume(TokenType::RIGHT_PAREN, "Expect ')' after expression");
     }
 
-    fn literal(&mut self, _vm: &mut Vm, chunk: &mut Chunk) {
+    fn literal(&mut self, _vm: &mut Vm, chunk: &mut Chunk, can_assign: bool) {
         match self.parser.previous.typ {
             TokenType::FALSE => {
                 self.emit_byte(chunk, OpCode::OP_FALSE as u8);
@@ -450,7 +455,7 @@ impl Compiler {
         }
     }
 
-    fn string(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
+    fn string(&mut self, vm: &mut Vm, chunk: &mut Chunk, can_assign: bool) {
         let chars = unsafe { self.parser.previous.start.add(1) };
         let length = self.parser.previous.length - 2;
 
@@ -459,7 +464,7 @@ impl Compiler {
         self.emit_constant(chunk, value);
     }
 
-    fn number(&mut self, _vm: &mut Vm, chunk: &mut Chunk) {
+    fn number(&mut self, _vm: &mut Vm, chunk: &mut Chunk, can_assign: bool) {
         let num = self.parser.previous.as_f64().unwrap_or_else(|| {
             panic!("Invalid number at line {}", self.parser.previous.line);
         });
@@ -467,13 +472,19 @@ impl Compiler {
         self.emit_constant(chunk, Value::Number(num));
     }
 
-    fn variable(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
-        self.named_variable(vm, chunk, self.parser.previous);
+    fn variable(&mut self, vm: &mut Vm, chunk: &mut Chunk, can_assign: bool) {
+        self.named_variable(vm, chunk, self.parser.previous, can_assign);
     }
 
-    fn named_variable(&mut self, vm: &mut Vm, chunk: &mut Chunk, name: Token) {
+    fn named_variable(&mut self, vm: &mut Vm, chunk: &mut Chunk, name: Token, can_assign: bool) {
         let arg = self.identifier_constant(vm, chunk, name);
-        self.emit_bytes(chunk, OpCode::OP_GET_GLOBAL as u8, arg as u8);
+
+        if can_assign && self.matches(TokenType::EQUAL) {
+            self.expression(vm, chunk);
+            self.emit_bytes(chunk, OpCode::OP_SET_GLOBAL as u8, arg as u8);
+        } else {
+            self.emit_bytes(chunk, OpCode::OP_GET_GLOBAL as u8, arg as u8);
+        }
     }
 
     fn matches(&mut self, typ: TokenType) -> bool {
