@@ -11,3 +11,31 @@ print "for loop";
 for(var i = 2; i >= 0; i = i - 1) {
     print i;
 }
+
+print "=== break in while ===";
+var i = 0;
+while (i < 5) {
+    i = i + 1;
+    if (i == 3) break;
+    print i;
+}
+
+print "=== continue in while ===";
+var i = 0;
+while (i < 5) {
+    i = i + 1;
+    if (i == 3) continue;
+    print i;
+}
+
+print "=== break in for ===";
+for (var i = 1; i <= 5; i = i + 1) {
+    if (i == 3) break;
+    print i;
+}
+
+print "=== continue in for ===";
+for (var i = 1; i <= 5; i = i + 1) {
+    if (i == 3) continue;
+    print i;
+}

@@ -1,0 +1,235 @@
+// complex.lox - Полный тест всех возможностей
+
+print "=== Testing Variables and Scoping ===";
+
+var global_var = 100;
+var another_global = 42;
+var text_var = "hello";
+
+print global_var;
+print another_global;
+print text_var;
+
+{
+    var local_var = 50;
+    var global_var = 999;
+    print local_var;
+    print global_var;
+
+    {
+        var nested = 777;
+        print nested;
+    }
+}
+
+print global_var;
+
+print "=== Testing If/Else ===";
+
+var score = 85;
+if (score >= 90) {
+    print "A";
+} else if (score >= 80) {
+    print "B";
+} else if (score >= 70) {
+    print "C";
+} else if (score >= 60) {
+    print "D";
+} else {
+    print "F";
+}
+
+var is_morning = true;
+var is_weekend = false;
+
+if (is_weekend) {
+    if (is_morning) {
+        print "Sleep in";
+    } else {
+        print "Enjoy weekend";
+    }
+} else {
+    if (is_morning) {
+        print "Time for work";
+    } else {
+        print "Working";
+    }
+}
+
+print "=== Testing While Loops ===";
+
+var counter = 0;
+while (counter < 5) {
+    counter = counter + 1;
+    print counter;
+}
+
+print "=== Testing While with Continue ===";
+
+var counter2 = 0;
+while (counter2 < 5) {
+    counter2 = counter2 + 1;
+    if (counter2 == 3) {
+        print "skip 3";
+        continue;
+    }
+    print counter2;
+}
+
+print "=== Testing While with Break ===";
+
+var counter3 = 0;
+while (counter3 < 10) {
+    counter3 = counter3 + 1;
+    if (counter3 == 5) {
+        print "break at 5";
+        break;
+    }
+    print counter3;
+}
+
+print "=== Testing For Loops ===";
+
+for (var i = 0; i < 5; i = i + 1) {
+    print i;
+}
+
+print "=== Testing For with Continue ===";
+
+for (var i = 0; i < 5; i = i + 1) {
+    if (i == 2) {
+        print "skip 2";
+        continue;
+    }
+    print i;
+}
+
+print "=== Testing For with Break ===";
+
+for (var i = 0; i < 5; i = i + 1) {
+    if (i == 3) {
+        print "break at 3";
+        break;
+    }
+    print i;
+}
+
+print "=== Testing Nested Loops ===";
+
+for (var i = 0; i < 3; i = i + 1) {
+    print i;
+    for (var j = 0; j < 2; j = j + 1) {
+        print j;
+    }
+}
+
+print "=== Testing Complex Loop Logic ===";
+
+var sum = 0;
+for (var n = 1; n <= 10; n = n + 1) {
+    if (n % 2 == 0) {
+        print "skip even";
+        print n;
+        continue;
+    }
+    if (n > 7) {
+        print "break at";
+        print n;
+        break;
+    }
+    sum = sum + n;
+    print sum;
+}
+
+print "=== Testing Comparisons ===";
+
+var a = 10;
+var b = 20;
+var c = 30;
+
+if (a < b and b < c) {
+    print "true";
+}
+
+if (a > b or b < c) {
+    print "true";
+}
+
+if (!(a > b)) {
+    print "true";
+}
+
+if (a == 10) {
+    print "true";
+}
+
+if (a != b) {
+    print "true";
+}
+
+if (a <= b) {
+    print "true";
+}
+
+if (c >= b) {
+    print "true";
+}
+
+print "=== Testing Logical Operators ===";
+
+var t = true;
+var f = false;
+
+if (t and t) {
+    print "true and true = true";
+}
+
+if (t or f) {
+    print "true or false = true";
+}
+
+if (!f) {
+    print "not false = true";
+}
+
+print "=== Testing Nil ===";
+
+var n = nil;
+if (n == nil) {
+    print "nil is nil";
+}
+
+if (nil == nil) {
+    print "nil equals nil";
+}
+
+print "=== Testing Variable Reassignment ===";
+
+var x = 5;
+print x;
+x = 10;
+print x;
+x = x * 2;
+print x;
+
+print "=== Testing Multiple Scopes ===";
+
+var outer = 100;
+print outer;
+
+{
+    var inner = 50;
+    print inner;
+    print outer;
+
+    {
+        var deepest = 25;
+        print deepest;
+        print inner;
+        print outer;
+    }
+}
+
+print outer;
+
+print "=== All tests completed successfully ===";

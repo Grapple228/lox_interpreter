@@ -95,7 +95,7 @@ impl Vm {
         unsafe { self.ip.offset_from(start) as usize }
     }
 
-    fn runtime_error(&mut self, stack: &mut Stack, chunk: &Chunk, message: &'static str) {
+    fn runtime_error(&mut self, stack: &mut Stack<Value>, chunk: &Chunk, message: &'static str) {
         eprintln!("{}", message);
 
         let instruction = self.current_offset(chunk) - 1;
@@ -106,7 +106,7 @@ impl Vm {
         self.ip = std::ptr::null_mut();
     }
 
-    fn unary_op<F>(&mut self, stack: &mut Stack, chunk: &Chunk, f: F) -> bool
+    fn unary_op<F>(&mut self, stack: &mut Stack<Value>, chunk: &Chunk, f: F) -> bool
     where
         F: FnOnce(Value) -> ValueResult,
     {
@@ -124,7 +124,7 @@ impl Vm {
         }
     }
 
-    fn binary_op<F>(&mut self, stack: &mut Stack, chunk: &Chunk, f: F) -> bool
+    fn binary_op<F>(&mut self, stack: &mut Stack<Value>, chunk: &Chunk, f: F) -> bool
     where
         F: FnOnce(Value, Value) -> ValueResult,
     {
@@ -143,7 +143,7 @@ impl Vm {
         }
     }
 
-    fn comparison_op<F>(&mut self, stack: &mut Stack, chunk: &Chunk, f: F) -> bool
+    fn comparison_op<F>(&mut self, stack: &mut Stack<Value>, chunk: &Chunk, f: F) -> bool
     where
         F: FnOnce(f64, f64) -> bool,
     {
@@ -177,7 +177,7 @@ impl Vm {
         }
     }
 
-    fn read_string(&mut self, stack: &mut Stack, chunk: &Chunk) -> Option<*mut ObjString> {
+    fn read_string(&mut self, stack: &mut Stack<Value>, chunk: &Chunk) -> Option<*mut ObjString> {
         // 1. Читаем имя переменной из констант
         let constant_idx = self.read_byte() as usize;
         let name = chunk.get_constant(constant_idx).unwrap();
@@ -194,7 +194,7 @@ impl Vm {
         Some(name_str)
     }
 
-    fn run(&mut self, stack: &mut Stack, chunk: &Chunk) -> InterpretResult {
+    fn run(&mut self, stack: &mut Stack<Value>, chunk: &Chunk) -> InterpretResult {
         self.ip = chunk.get_code_ptr();
 
         loop {
@@ -231,7 +231,7 @@ impl Vm {
                 OpCode::OP_GET_LOCAL => {
                     let slot = self.read_byte() as usize;
                     let value = stack.get(slot);
-                    stack.push(value);
+                    stack.push(*value);
                 }
 
                 OpCode::OP_SET_LOCAL => {
@@ -318,6 +318,7 @@ impl Vm {
                         return InterpretResult::RuntimeError;
                     }
                 }
+
                 OpCode::OP_ADD => {
                     const ERR_MSG: &str = "Operands must be numbers or strings.";
                     let right = stack.pop();
@@ -340,6 +341,11 @@ impl Vm {
                 }
                 OpCode::OP_SUBSTRACT => {
                     if self.binary_op(stack, chunk, |a, b| a - b) {
+                        return InterpretResult::RuntimeError;
+                    }
+                }
+                OpCode::OP_MOD => {
+                    if self.binary_op(stack, chunk, |a, b| a % b) {
                         return InterpretResult::RuntimeError;
                     }
                 }

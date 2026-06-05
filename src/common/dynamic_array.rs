@@ -157,6 +157,27 @@ impl<T> DynamicArray<T> {
         result
     }
 
+    pub fn remove(&mut self, index: usize) -> T {
+        if index >= self.count {
+            panic!("Index out of bounds: {} >= {}", index, self.count);
+        }
+
+        unsafe {
+            let ptr = self.values.unwrap().as_ptr();
+            let value = ptr.add(index).read();
+
+            // Сдвигаем элементы влево
+            for i in index..self.count - 1 {
+                let src = ptr.add(i + 1);
+                let dst = ptr.add(i);
+                dst.write(src.read());
+            }
+
+            self.count -= 1;
+            value
+        }
+    }
+
     pub fn set(&mut self, offset: usize, value: T) {
         if offset >= self.count {
             panic!("Index out of bounds: {} >= {}", offset, self.count);
@@ -169,6 +190,10 @@ impl<T> DynamicArray<T> {
         unsafe {
             values_ptr.as_ptr().add(offset).write(value);
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.count
     }
 }
 
@@ -199,5 +224,21 @@ impl<T> Drop for DynamicArray<T> {
 impl<T> Default for DynamicArray<T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+use std::ops::{Index, IndexMut};
+
+impl<T> Index<usize> for DynamicArray<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &T {
+        self.get(index).expect("Index out of bounds")
+    }
+}
+
+impl<T> IndexMut<usize> for DynamicArray<T> {
+    fn index_mut(&mut self, index: usize) -> &mut T {
+        self.get_mut(index).expect("Index out of bounds")
     }
 }

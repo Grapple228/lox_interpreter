@@ -1,5 +1,5 @@
 use crate::common::object::Obj;
-use std::ops::{Div, Mul, Neg, Not, Sub};
+use std::ops::{Div, Mul, Neg, Not, Rem, Sub};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Value {
@@ -132,6 +132,18 @@ impl Div for Value {
         match (self, rhs) {
             (Value::Number(_), Value::Number(0.0)) => ValueResult::Error("Division by zero"),
             (Value::Number(a), Value::Number(b)) => Value::Number(a / b).into(),
+            (_, _) => ValueResult::Error("Operands must be a numbers."),
+        }
+    }
+}
+
+impl Rem for Value {
+    type Output = ValueResult;
+
+    fn rem(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Value::Number(_), Value::Number(0.0)) => ValueResult::Error("Modulo by zero"),
+            (Value::Number(a), Value::Number(b)) => Value::Number(a % b).into(),
             (_, _) => ValueResult::Error("Operands must be a numbers."),
         }
     }

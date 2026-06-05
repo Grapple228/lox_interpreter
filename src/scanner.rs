@@ -1,4 +1,7 @@
-use crate::token::{Token, TokenType};
+use crate::{
+    common::utils,
+    token::{Token, TokenType},
+};
 
 pub struct Scanner {
     start: *const u8,
@@ -50,7 +53,7 @@ impl Scanner {
             b'+' => self.make_token(TokenType::PLUS),
             b'/' => self.make_token(TokenType::SLASH),
             b'*' => self.make_token(TokenType::STAR),
-
+            b'%' => self.make_token(TokenType::PERCENT),
             b'!' => {
                 let token_type = if self.matches(b'=') {
                     TokenType::BANG_EQUAL
@@ -99,12 +102,12 @@ impl Scanner {
 
     #[inline(always)]
     fn is_alpha(c: u8) -> bool {
-        matches!(c, b'a'..b'z' | b'A'..b'Z' | b'_')
+        matches!(c, b'a'..=b'z' | b'A'..=b'Z' | b'_')
     }
 
     #[inline(always)]
     fn is_digit(c: u8) -> bool {
-        matches!(c, b'0'..b'9')
+        matches!(c, b'0'..=b'9')
     }
 
     fn identifier(&mut self) -> Token {
@@ -118,7 +121,27 @@ impl Scanner {
     fn identifier_type(&self) -> TokenType {
         match unsafe { *self.start } {
             b'a' => self.check_keyword(1, 2, b"nd", TokenType::AND),
-            b'c' => self.check_keyword(1, 4, b"lass", TokenType::CLASS),
+            b'b' => {
+                if unsafe { self.current.offset_from(self.start) } > 1 {
+                    match unsafe { *self.start.add(1) } {
+                        b'r' => self.check_keyword(2, 3, b"eak", TokenType::BREAK),
+                        _ => TokenType::IDENTIFIER,
+                    }
+                } else {
+                    TokenType::IDENTIFIER
+                }
+            }
+            b'c' => {
+                if unsafe { self.current.offset_from(self.start) } > 1 {
+                    match unsafe { *self.start.add(1) } {
+                        b'l' => self.check_keyword(2, 3, b"ass", TokenType::CLASS),
+                        b'o' => self.check_keyword(2, 6, b"ntinue", TokenType::CONTINUE),
+                        _ => TokenType::IDENTIFIER,
+                    }
+                } else {
+                    TokenType::IDENTIFIER
+                }
+            }
             b'e' => self.check_keyword(1, 3, b"lse", TokenType::ELSE),
             b'f' if unsafe { self.current.offset_from(self.start) } > 1 => {
                 match unsafe { *self.start.add(1) } {
@@ -148,15 +171,6 @@ impl Scanner {
         }
     }
 
-    unsafe fn memcmp(ptr1: *const u8, ptr2: *const u8, n: usize) -> i32 {
-        for i in 0..n {
-            if *ptr1.add(i) != *ptr2.add(i) {
-                return (*ptr1.add(i) as i32) - (*ptr2.add(i) as i32);
-            }
-        }
-        0
-    }
-
     fn check_keyword(
         &self,
         start: usize,
@@ -166,7 +180,7 @@ impl Scanner {
     ) -> TokenType {
         if unsafe {
             self.current.offset_from(self.start) as usize == start + length
-                && Self::memcmp(self.start.add(start), rest.as_ptr(), length) == 0
+                && utils::memcmp(self.start.add(start), rest.as_ptr(), length) == 0
         } {
             return typ;
         }

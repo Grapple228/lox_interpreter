@@ -1,5 +1,5 @@
 use crate::{
-    common::{object::Obj, Chunk, OpCode, Value},
+    common::{object::Obj, Chunk, DynamicArray, OpCode, Value},
     parser::Parser,
     precedence::Precedence,
     scanner::Scanner,
@@ -9,6 +9,7 @@ use crate::{
         TokenType::{self},
     },
     vm::Vm,
+    Stack,
 };
 
 type ParseFn = fn(&mut Compiler, &mut Vm, &mut Chunk, bool);
@@ -19,7 +20,7 @@ pub struct ParseRule {
     precedence: Precedence,
 }
 
-const RULES: [ParseRule; 40] = [
+const RULES: [ParseRule; 43] = [
     // TokenType индексы должны соответствовать порядку в enum
     ParseRule {
         prefix: Some(Compiler::grouping),
@@ -76,6 +77,11 @@ const RULES: [ParseRule; 40] = [
         infix: Some(Compiler::binary),
         precedence: Precedence::FACTOR,
     }, // STAR
+    ParseRule {
+        prefix: None,
+        infix: Some(Compiler::binary),
+        precedence: Precedence::FACTOR,
+    }, // PERCENT
     ParseRule {
         prefix: Some(Compiler::unary),
         infix: None,
@@ -221,6 +227,16 @@ const RULES: [ParseRule; 40] = [
         infix: None,
         precedence: Precedence::NONE,
     }, // EOF
+    ParseRule {
+        prefix: None,
+        infix: None,
+        precedence: Precedence::NONE,
+    }, // BREAK
+    ParseRule {
+        prefix: None,
+        infix: None,
+        precedence: Precedence::NONE,
+    }, // CONTINUE
 ];
 
 fn get_rule(typ: TokenType) -> &'static ParseRule {
@@ -244,6 +260,13 @@ impl Local {
     }
 }
 
+struct LoopScope {
+    start: usize,             // начало цикла (куда прыгать на continue)
+    exit_jump: Option<usize>, // выход для break (будет заполнен позже)
+    scope_depth: usize,       // глубина области видимости
+    has_increment: bool,      // true для for, false для while
+}
+
 pub struct Compiler {
     parser: Parser,
     scanner: Option<Scanner>,
@@ -252,6 +275,9 @@ pub struct Compiler {
     locals: [Local; U8_COUNT],
     local_count: usize,
     scope_depth: usize,
+
+    loop_scopes: Stack<LoopScope>,             // стек циклов
+    break_jumps: DynamicArray<(usize, usize)>, // (offset_jump, scope_index)
 }
 
 impl Compiler {
@@ -264,6 +290,9 @@ impl Compiler {
             local_count: 0,
             scope_depth: 0,
             locals: [Local::empty(); U8_COUNT],
+
+            loop_scopes: Stack::new(),
+            break_jumps: DynamicArray::new(),
         }
     }
 
@@ -435,6 +464,7 @@ impl Compiler {
             TokenType::MINUS => self.emit_byte(chunk, OpCode::OP_SUBSTRACT as u8),
             TokenType::STAR => self.emit_byte(chunk, OpCode::OP_MULTIPLY as u8),
             TokenType::SLASH => self.emit_byte(chunk, OpCode::OP_DIVIDE as u8),
+            TokenType::PERCENT => self.emit_byte(chunk, OpCode::OP_MOD as u8),
 
             // EQUALITY
             TokenType::BANG_EQUAL => {
@@ -741,6 +771,12 @@ impl Compiler {
     fn statement(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
         if self.matches(TokenType::PRINT) {
             self.print_statement(vm, chunk);
+        } else if self.matches(TokenType::CONTINUE) {
+            self.consume(TokenType::SEMICOLON, "Expect ';' after 'continue'.");
+            self.continue_statement(chunk);
+        } else if self.matches(TokenType::BREAK) {
+            self.consume(TokenType::SEMICOLON, "Expect ';' after 'break'.");
+            self.break_statement(chunk);
         } else if self.matches(TokenType::FOR) {
             self.for_statement(vm, chunk);
         } else if self.matches(TokenType::IF) {
@@ -756,8 +792,84 @@ impl Compiler {
         }
     }
 
+    fn patch_breaks(&mut self, chunk: &mut Chunk, scope_idx: usize, exit_offset: usize) {
+        let mut i = 0;
+        while i < self.break_jumps.len() {
+            let (jump_offset, saved_scope_idx) = self.break_jumps[i];
+            if saved_scope_idx == scope_idx {
+                let jump = exit_offset - jump_offset - 2;
+                chunk.code.set(jump_offset, ((jump >> 8) & 0xff) as u8);
+                chunk.code.set(jump_offset + 1, (jump & 0xff) as u8);
+                self.break_jumps.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    fn break_statement(&mut self, chunk: &mut Chunk) {
+        if self.loop_scopes.is_empty() {
+            self.error("'break' must be inside a loop.");
+            return;
+        }
+
+        let (scope_depth) = {
+            let scope = self.loop_scopes.peek(0);
+            (scope.scope_depth)
+        };
+
+        // Очищаем локальные переменные
+        while self.local_count > 0 {
+            let local = self.locals[self.local_count - 1];
+            if local.depth.unwrap_or(0) <= scope_depth {
+                break;
+            }
+            self.emit_byte(chunk, OpCode::OP_POP as u8);
+            self.local_count -= 1;
+        }
+
+        // Прыгаем на выход (пока placeholder)
+        let jump = self.emit_jump(chunk, OpCode::OP_JUMP as u8);
+
+        // Сохраняем для патчинга
+        self.break_jumps.write((jump, self.loop_scopes.len() - 1));
+    }
+
+    fn continue_statement(&mut self, chunk: &mut Chunk) {
+        if self.loop_scopes.is_empty() {
+            self.error("'continue' must be inside a loop.");
+            return;
+        }
+
+        let (scope_depth, scope_start) = {
+            let scope = self.loop_scopes.peek(0);
+            (scope.scope_depth, scope.start)
+        };
+
+        // Очищаем локальные переменные, объявленные в теле цикла
+        while self.local_count > 0 {
+            let local = self.locals[self.local_count - 1];
+            if local.depth.unwrap_or(0) <= scope_depth {
+                break;
+            }
+            self.emit_byte(chunk, OpCode::OP_POP as u8);
+            self.local_count -= 1;
+        }
+
+        // Прыгаем на начало цикла (или на инкремент для for)
+        self.emit_loop(chunk, scope_start);
+    }
+
     fn for_statement(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
         self.begin_scope(vm, chunk);
+
+        let scope_idx = self.loop_scopes.len();
+        self.loop_scopes.push(LoopScope {
+            start: 0, // временно
+            exit_jump: None,
+            scope_depth: self.scope_depth,
+            has_increment: false,
+        });
 
         self.consume(TokenType::LEFT_PAREN, "Expect '(' after 'for'.");
 
@@ -793,7 +905,18 @@ impl Compiler {
             self.emit_loop(chunk, loop_start);
             loop_start = increment_start;
 
+            {
+                let scope = self.loop_scopes.peek_mut(0);
+                scope.start = increment_start; // continue прыгает на инкремент
+                scope.has_increment = true;
+            }
+
             self.patch_jump(chunk, body_jump);
+        } else {
+            {
+                let scope = self.loop_scopes.peek_mut(0);
+                scope.start = loop_start; // continue прыгает на условие
+            }
         }
 
         self.statement(vm, chunk);
@@ -804,11 +927,28 @@ impl Compiler {
             self.emit_byte(chunk, OpCode::OP_POP as u8); // Condition
         }
 
+        {
+            let scope = self.loop_scopes.peek_mut(0);
+            scope.exit_jump = Some(chunk.count());
+        }
+
+        self.patch_breaks(chunk, scope_idx, chunk.count());
+        self.loop_scopes.pop();
+
         self.end_scope(vm, chunk);
     }
 
     fn while_statement(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
         let loop_start = chunk.count();
+
+        // сохраняем информацию о цикле
+        let scope_idx = self.loop_scopes.len();
+        self.loop_scopes.push(LoopScope {
+            start: loop_start,
+            exit_jump: None,
+            scope_depth: self.scope_depth,
+            has_increment: false,
+        });
 
         self.consume(TokenType::LEFT_PAREN, "Expect '(' after 'while'.");
         self.expression(vm, chunk);
@@ -816,12 +956,22 @@ impl Compiler {
 
         let exit_jump = self.emit_jump(chunk, OpCode::OP_JUMP_IF_FALSE as u8);
         self.emit_byte(chunk, OpCode::OP_POP as u8);
+
         self.statement(vm, chunk);
 
         self.emit_loop(chunk, loop_start);
 
         self.patch_jump(chunk, exit_jump);
         self.emit_byte(chunk, OpCode::OP_POP as u8);
+
+        // Обновляем exit_jump для break
+        {
+            let scope = self.loop_scopes.peek_mut(0);
+            scope.exit_jump = Some(chunk.count())
+        }
+
+        self.loop_scopes.pop();
+        self.patch_breaks(chunk, scope_idx, chunk.count());
     }
 
     fn if_statement(&mut self, vm: &mut Vm, chunk: &mut Chunk) {
