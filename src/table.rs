@@ -2,7 +2,10 @@ use std::alloc::{alloc, dealloc, Layout};
 
 use tracing::debug;
 
-use crate::common::{object::ObjString, utils, Value};
+use crate::{
+    common::{utils, Value},
+    ObjString,
+};
 
 pub struct Table {
     count: usize,

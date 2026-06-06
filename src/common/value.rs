@@ -1,4 +1,4 @@
-use crate::common::object::Obj;
+use crate::object::Obj;
 use std::ops::{Div, Mul, Neg, Not, Rem, Sub};
 
 #[derive(Debug, Clone, Copy)]
@@ -28,6 +28,22 @@ impl Value {
 
     pub fn is_nil(&self) -> bool {
         matches!(self, Value::Nil)
+    }
+
+    pub fn as_index(&self) -> Option<usize> {
+        if let Value::Index(num) = self {
+            Some(*num)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_number(&self) -> Option<f64> {
+        if let Value::Number(num) = self {
+            Some(*num)
+        } else {
+            None
+        }
     }
 }
 

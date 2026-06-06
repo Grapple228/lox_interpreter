@@ -1,4 +1,4 @@
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::common::{
     dynamic_array::DynamicArray,
@@ -14,6 +14,12 @@ pub struct Chunk {
 }
 
 impl Chunk {
+    pub fn free(&mut self) {
+        self.code.free();
+        self.constants.free();
+        self.lines.free();
+    }
+
     pub fn count(&self) -> usize {
         self.code.count()
     }

@@ -1,13 +1,11 @@
 use tracing::debug;
 
 use crate::{
-    common::{
-        object::{Obj, ObjString, ObjType},
-        Chunk, OpCode, Value, ValueResult,
-    },
+    common::{Chunk, OpCode, Value, ValueResult},
     compiler::Compiler,
+    object::FunctionType,
     table::Table,
-    Stack,
+    Obj, ObjString, ObjType, Stack,
 };
 
 pub enum InterpretResult {
@@ -381,9 +379,9 @@ impl Vm {
 
     pub fn interpret(&mut self, source: *const u8) -> InterpretResult {
         let mut chunk = Chunk::new();
-        let mut compiler = Compiler::new();
+        let mut compiler = Compiler::new(self, FunctionType::Script);
 
-        if !compiler.compile(self, source, &mut chunk) {
+        if !compiler.compile(source, &mut chunk as *mut Chunk) {
             return InterpretResult::CompileError;
         };
 

@@ -195,10 +195,8 @@ impl<T> DynamicArray<T> {
     pub fn len(&self) -> usize {
         self.count
     }
-}
 
-impl<T> Drop for DynamicArray<T> {
-    fn drop(&mut self) {
+    pub fn free(&mut self) {
         if let Some(ptr) = self.values {
             if self.capacity > 0 {
                 // Сначала вызываем drop для каждого элемента
@@ -218,6 +216,12 @@ impl<T> Drop for DynamicArray<T> {
                 }
             }
         }
+    }
+}
+
+impl<T> Drop for DynamicArray<T> {
+    fn drop(&mut self) {
+        self.free();
     }
 }
 
