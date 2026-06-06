@@ -1,27 +1,37 @@
+#![allow(static_mut_refs)]
+
 use crate::{
     common::utils,
     token::{Token, TokenType},
 };
 
-pub struct Scanner {
+static mut SCANNER: Option<Scanner> = None;
+
+pub fn init_scanner(source: *const u8) {
+    unsafe {
+        SCANNER = Some(Scanner {
+            start: source,
+            current: source,
+            line: 1,
+        });
+    }
+}
+
+pub fn scanner_line() -> usize {
+    unsafe { SCANNER.as_ref().unwrap().line }
+}
+
+pub fn scan_token() -> Token {
+    unsafe { SCANNER.as_mut().unwrap().scan_token() }
+}
+
+struct Scanner {
     start: *const u8,
     current: *const u8,
     line: usize,
 }
 
 impl Scanner {
-    pub fn new(source: *const u8) -> Self {
-        Self {
-            start: source,
-            current: source,
-            line: 1,
-        }
-    }
-
-    pub fn line(&self) -> usize {
-        self.line
-    }
-
     pub fn scan_token(&mut self) -> Token {
         self.skip_whitespace();
         self.start = self.current;

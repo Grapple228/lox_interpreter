@@ -1,5 +1,5 @@
 use std::{
-    alloc::{alloc, dealloc, realloc, Layout},
+    alloc::{alloc, realloc, Layout},
     ptr::NonNull,
 };
 use tracing::debug;
@@ -10,7 +10,6 @@ pub struct DynamicArray<T> {
     count: usize,
     capacity: usize,
     values: Option<NonNull<T>>,
-    _marker: std::marker::PhantomData<T>,
 }
 
 impl<T> DynamicArray<T> {
@@ -35,7 +34,6 @@ impl<T> DynamicArray<T> {
             count: 0,
             capacity: 0,
             values: None,
-            _marker: std::marker::PhantomData,
         }
     }
 
@@ -51,7 +49,6 @@ impl<T> DynamicArray<T> {
             count: 0,
             capacity,
             values: NonNull::new(ptr as *mut T),
-            _marker: std::marker::PhantomData,
         }
     }
 
@@ -194,34 +191,6 @@ impl<T> DynamicArray<T> {
 
     pub fn len(&self) -> usize {
         self.count
-    }
-
-    pub fn free(&mut self) {
-        if let Some(ptr) = self.values {
-            if self.capacity > 0 {
-                // Сначала вызываем drop для каждого элемента
-                for i in 0..self.count {
-                    unsafe {
-                        ptr.as_ptr().add(i).drop_in_place();
-                    }
-                }
-
-                let layout = Layout::array::<T>(self.capacity).unwrap();
-                unsafe {
-                    dealloc(ptr.as_ptr() as *mut u8, layout);
-                    debug!(
-                        "Dynamic array memory deallocated (capacity: {})",
-                        self.capacity
-                    );
-                }
-            }
-        }
-    }
-}
-
-impl<T> Drop for DynamicArray<T> {
-    fn drop(&mut self) {
-        self.free();
     }
 }
 

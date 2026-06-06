@@ -15,12 +15,10 @@ mod error;
 mod macros;
 mod object;
 mod precedence;
-mod stack;
 
 // -- Flatten
 pub use error::{Error, Result};
 pub use object::{Obj, ObjFunction, ObjString, ObjType};
-pub use stack::Stack;
 
 // endregion: --- Modules
 

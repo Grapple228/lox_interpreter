@@ -64,6 +64,7 @@ impl Value {
 }
 
 impl Vm {
+    #[allow(unused)]
     fn allocate_string(&mut self, length: usize) -> *mut ObjString {
         let total_size = size_of::<ObjString>() + length + 1;
         let layout = Layout::from_size_align(total_size, align_of::<ObjString>()).unwrap();

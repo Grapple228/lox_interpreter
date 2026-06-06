@@ -2,10 +2,12 @@ pub mod utils;
 
 mod chunk;
 mod dynamic_array;
+mod stack;
 mod value;
 
 pub use chunk::Chunk;
 pub use dynamic_array::DynamicArray;
+pub use stack::Stack;
 pub use value::{Value, ValueResult};
 
 use crate::define_enum_with_values;
@@ -45,5 +47,6 @@ define_enum_with_values! {
         OP_JUMP = 23 => "OP_JUMP",
         OP_LOOP = 24 => "OP_LOOP",
         OP_MOD = 25 => "OP_MOD",
+        OP_CALL = 26 => "OP_CALL",
     }
 }

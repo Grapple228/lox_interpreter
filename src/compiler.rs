@@ -1,16 +1,16 @@
 use crate::{
-    common::{Chunk, DynamicArray, OpCode, Value},
+    common::{Chunk, DynamicArray, OpCode, Stack, Value},
     object::{FunctionType, Obj},
-    parser::Parser,
+    parser::get_parser,
     precedence::Precedence,
-    scanner::Scanner,
+    scanner::{init_scanner, scan_token, scanner_line},
     table::Table,
     token::{
         Token,
         TokenType::{self},
     },
     vm::Vm,
-    ObjFunction, Stack,
+    ObjFunction,
 };
 
 type ParseFn = fn(&mut Compiler, bool);
@@ -25,8 +25,8 @@ const RULES: [ParseRule; 43] = [
     // TokenType индексы должны соответствовать порядку в enum
     ParseRule {
         prefix: Some(Compiler::grouping),
-        infix: None,
-        precedence: Precedence::NONE,
+        infix: Some(Compiler::call),
+        precedence: Precedence::CALL,
     }, // LEFT_PAREN
     ParseRule {
         prefix: None,
@@ -268,29 +268,56 @@ struct LoopScope {
     has_increment: bool,      // true для for, false для while
 }
 
+pub struct CallFrame {
+    pub function: *mut ObjFunction,
+    pub ip: *mut u8,
+    pub slots: *mut Value,
+}
+
+impl CallFrame {
+    pub fn null() -> Self {
+        Self {
+            function: std::ptr::null_mut(),
+            ip: std::ptr::null_mut(),
+            slots: std::ptr::null_mut(),
+        }
+    }
+}
+
+static mut CURRENT: *mut Compiler = std::ptr::null_mut();
+
+fn current_compiler() -> *mut Compiler {
+    unsafe { CURRENT }
+}
+
+fn set_current_compiler(compiler: *mut Compiler) {
+    unsafe {
+        CURRENT = compiler;
+    }
+}
+
 pub struct Compiler {
-    parser: Parser,
     vm: *mut Vm,
-    scanner: Option<Scanner>,
     vars_cache: Table,
 
     locals: [Local; U8_COUNT],
     local_count: usize,
     scope_depth: usize,
 
-    loop_scopes: Stack<LoopScope>,             // стек циклов
+    loop_scopes: Stack<256, LoopScope>,        // стек циклов
     break_jumps: DynamicArray<(usize, usize)>, // (offset_jump, scope_index)
 
-    // function: *mut ObjFunction,
+    function: *mut ObjFunction,
     typ: FunctionType,
-    current_chunk: *mut Chunk,
+
+    enclosing: *mut Compiler,
 }
 
 impl Compiler {
     pub fn new(vm: *mut Vm, typ: FunctionType) -> Self {
-        Self {
-            parser: Parser::new(),
-            scanner: None,
+        let enclosing = current_compiler();
+
+        let mut compiler = Self {
             vars_cache: Table::new(),
 
             local_count: 0,
@@ -300,18 +327,40 @@ impl Compiler {
             loop_scopes: Stack::new(),
             break_jumps: DynamicArray::new(),
 
-            current_chunk: std::ptr::null_mut(),
-            // function: ObjFunction::new(unsafe { &mut *vm }),
+            function: ObjFunction::new(unsafe { &mut *vm }),
             typ,
             vm,
+
+            enclosing,
+        };
+
+        set_current_compiler(&mut compiler);
+
+        if typ != FunctionType::Script {
+            let parser = get_parser();
+            unsafe {
+                (*compiler.function).name =
+                    (*vm).copy_string(parser.previous.start, parser.previous.length)
+            };
         }
+
+        let local = &mut compiler.locals[0];
+        local.depth = Some(0);
+        local.name.start = "".as_ptr();
+        local.name.length = 0;
+
+        compiler.local_count += 1;
+
+        compiler
     }
 
     fn error_at(&mut self, token: Token, message: &'static str) {
-        if self.parser.panic_mode {
+        let parser = get_parser();
+
+        if parser.panic_mode {
             return;
         }
-        self.parser.panic_mode = true;
+        parser.panic_mode = true;
 
         eprint!("[line {}] Error", token.line);
 
@@ -335,26 +384,26 @@ impl Compiler {
         }
 
         eprint!(": {}\n", message);
-        self.parser.had_error = true;
+        parser.had_error = true;
     }
 
     #[inline(always)]
     fn current_chunk(&self) -> &mut Chunk {
-        // unsafe { &mut *(*self.function).chunk() }
+        unsafe { &mut *(*self.function).chunk() }
 
-        unsafe { &mut *self.current_chunk }
+        // unsafe { &mut *self.current_chunk }
     }
 
     fn error(&mut self, message: &'static str) {
-        self.error_at(self.parser.previous, message);
+        self.error_at(get_parser().previous, message);
     }
 
     fn error_at_current(&mut self, message: &'static str) {
-        self.error_at(self.parser.current, message);
+        self.error_at(get_parser().current, message);
     }
 
     fn consume(&mut self, typ: TokenType, message: &'static str) {
-        if self.parser.current.typ == typ {
+        if get_parser().current.typ == typ {
             self.advance();
             return;
         }
@@ -363,23 +412,21 @@ impl Compiler {
     }
 
     pub fn advance(&mut self) {
-        self.parser.previous = self.parser.current;
+        let parser = get_parser();
+
+        parser.previous = parser.current;
 
         loop {
-            let scanner = self
-                .scanner
-                .as_mut()
-                .expect("Scanner should be initialized at this point");
-            self.parser.current = scanner.scan_token();
+            parser.current = scan_token();
 
-            if self.parser.current.typ != TokenType::ERROR {
+            if parser.current.typ != TokenType::ERROR {
                 break;
             }
 
             let message = unsafe {
                 std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                    self.parser.current.start,
-                    self.parser.current.length,
+                    parser.current.start,
+                    parser.current.length,
                 ))
             };
 
@@ -388,18 +435,13 @@ impl Compiler {
     }
 
     fn emit_constant(&mut self, value: Value) -> usize {
-        let line = self
-            .scanner
-            .as_ref()
-            .expect("Scanner should be initialized at this point")
-            .line();
-
+        let line = scanner_line();
         let chunk = self.current_chunk();
         chunk.write_constant(value, line)
     }
 
     fn emit_byte(&mut self, byte: u8) {
-        let line = self.parser.previous.line;
+        let line = get_parser().previous.line;
         let chunk = self.current_chunk();
         chunk.write(byte, line);
     }
@@ -410,6 +452,7 @@ impl Compiler {
     }
 
     fn emit_return(&mut self) {
+        self.emit_byte(OpCode::OP_NIL as u8);
         self.emit_byte(OpCode::OP_RETURN as u8);
     }
 
@@ -433,20 +476,35 @@ impl Compiler {
         self.emit_byte(offset as u8 & 0xff);
     }
 
-    fn end(&mut self) {
+    fn end(&mut self) -> *mut ObjFunction {
         self.emit_return();
+        let function = self.function;
 
         if cfg!(debug_assertions) {
-            if !self.parser.had_error {
-                self.current_chunk().disassemble("code");
+            if !get_parser().had_error {
+                let name = unsafe {
+                    if !(*function).name().is_null() {
+                        (*(*function).name()).as_str()
+                    } else {
+                        "<script>"
+                    }
+                };
+
+                self.current_chunk().disassemble(name);
             }
         }
+
+        set_current_compiler(self.enclosing);
+
+        function
     }
 
     fn parse_precedence(&mut self, precedence: Precedence) {
+        let parser = get_parser();
+
         self.advance();
 
-        let Some(prefix_rule) = get_rule(self.parser.previous.typ).prefix else {
+        let Some(prefix_rule) = get_rule(parser.previous.typ).prefix else {
             self.error("Expect expression.");
             return;
         };
@@ -454,10 +512,10 @@ impl Compiler {
         let can_assign = precedence <= Precedence::ASSIGNMENT;
         prefix_rule(self, can_assign);
 
-        while precedence <= get_rule(self.parser.current.typ).precedence {
+        while precedence <= get_rule(parser.current.typ).precedence {
             self.advance();
 
-            let Some(infix_rule) = get_rule(self.parser.previous.typ).infix else {
+            let Some(infix_rule) = get_rule(parser.previous.typ).infix else {
                 self.error("Expect expression.");
                 return;
             };
@@ -474,8 +532,8 @@ impl Compiler {
         self.parse_precedence(Precedence::ASSIGNMENT);
     }
 
-    fn binary(&mut self, can_assign: bool) {
-        let operator_type = self.parser.previous.typ;
+    fn binary(&mut self, _can_assign: bool) {
+        let operator_type = get_parser().previous.typ;
         let rule = get_rule(operator_type);
         self.parse_precedence(rule.precedence.next());
 
@@ -503,8 +561,8 @@ impl Compiler {
         }
     }
 
-    fn unary(&mut self, can_assign: bool) {
-        let operator_type = self.parser.previous.typ;
+    fn unary(&mut self, _can_assign: bool) {
+        let operator_type = get_parser().previous.typ;
 
         // Compile the operand.
         self.parse_precedence(Precedence::UNARY);
@@ -521,13 +579,13 @@ impl Compiler {
         }
     }
 
-    fn grouping(&mut self, can_assign: bool) {
+    fn grouping(&mut self, _can_assign: bool) {
         self.expression();
         self.consume(TokenType::RIGHT_PAREN, "Expect ')' after expression");
     }
 
-    fn literal(&mut self, can_assign: bool) {
-        match self.parser.previous.typ {
+    fn literal(&mut self, _can_assign: bool) {
+        match get_parser().previous.typ {
             TokenType::FALSE => {
                 self.emit_byte(OpCode::OP_FALSE as u8);
             }
@@ -541,24 +599,28 @@ impl Compiler {
         }
     }
 
-    fn string(&mut self, can_assign: bool) {
-        let chars = unsafe { self.parser.previous.start.add(1) };
-        let length = self.parser.previous.length - 2;
+    fn string(&mut self, _can_assign: bool) {
+        let parser = get_parser();
+
+        let chars = unsafe { parser.previous.start.add(1) };
+        let length = parser.previous.length - 2;
 
         let obj_string = unsafe { (*self.vm).copy_string(chars, length) };
         let value = Value::Obj(obj_string as *mut Obj);
         self.emit_constant(value);
     }
 
-    fn number(&mut self, can_assign: bool) {
-        let num = self.parser.previous.as_f64().unwrap_or_else(|| {
-            panic!("Invalid number at line {}", self.parser.previous.line);
+    fn number(&mut self, _can_assign: bool) {
+        let parser = get_parser();
+
+        let num = parser.previous.as_f64().unwrap_or_else(|| {
+            panic!("Invalid number at line {}", parser.previous.line);
         });
 
         self.emit_constant(Value::Number(num));
     }
 
-    fn or(&mut self, can_assign: bool) {
+    fn or(&mut self, _can_assign: bool) {
         let else_jump = self.emit_jump(OpCode::OP_JUMP_IF_FALSE as u8);
         let end_jump = self.emit_jump(OpCode::OP_JUMP as u8);
 
@@ -569,7 +631,7 @@ impl Compiler {
         self.patch_jump(end_jump);
     }
 
-    fn and(&mut self, can_assign: bool) {
+    fn and(&mut self, _can_assign: bool) {
         let end_jump = self.emit_jump(OpCode::OP_JUMP_IF_FALSE as u8);
 
         self.emit_byte(OpCode::OP_POP as u8);
@@ -579,7 +641,7 @@ impl Compiler {
     }
 
     fn variable(&mut self, can_assign: bool) {
-        self.named_variable(self.parser.previous, can_assign);
+        self.named_variable(get_parser().previous, can_assign);
     }
 
     fn resolve_local(&mut self, name: Token) -> Option<usize> {
@@ -626,19 +688,93 @@ impl Compiler {
     }
 
     fn check(&self, typ: TokenType) -> bool {
-        self.parser.current.typ == typ
+        get_parser().current.typ == typ
     }
 
     fn declaration(&mut self) {
-        if self.matches(TokenType::VAR) {
+        if self.matches(TokenType::FUN) {
+            self.fun_declaration();
+        } else if self.matches(TokenType::VAR) {
             self.var_declaration();
         } else {
             self.statement();
         }
 
-        if self.parser.panic_mode {
+        if get_parser().panic_mode {
             self.synchronize();
         }
+    }
+
+    fn fun_declaration(&mut self) {
+        let global = self.parse_variable("Expect function name");
+        self.mark_initialized();
+        self.function(FunctionType::Function);
+        self.define_variable(global);
+    }
+
+    fn call(&mut self, _can_assign: bool) {
+        let arg_count = self.argument_list();
+        self.emit_bytes(OpCode::OP_CALL as u8, arg_count as u8);
+    }
+
+    fn argument_list(&mut self) -> usize {
+        let mut arg_count = 0;
+
+        if !self.check(TokenType::RIGHT_PAREN) {
+            loop {
+                self.expression();
+
+                if arg_count == 255 {
+                    self.error("Can't have more than 255 arguments.");
+                }
+
+                arg_count += 1;
+
+                if !self.matches(TokenType::COMMA) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RIGHT_PAREN, "Expect ')' after arguments.");
+
+        arg_count
+    }
+
+    fn function(&mut self, typ: FunctionType) {
+        let mut compiler = Compiler::new(self.vm, typ);
+
+        compiler.begin_scope();
+
+        compiler.consume(TokenType::LEFT_PAREN, "Expect '(' after function name.");
+
+        if !compiler.check(TokenType::RIGHT_PAREN) {
+            loop {
+                unsafe {
+                    (*compiler.function).arity += 1;
+
+                    if (*compiler.function).arity > 255 {
+                        compiler.error_at_current("Can't have more than 255 parameters.");
+                    }
+
+                    let constant = compiler.parse_variable("Expect parameter name.");
+
+                    compiler.define_variable(constant);
+                    if !compiler.matches(TokenType::COMMA) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        compiler.consume(TokenType::RIGHT_PAREN, "Expect ')' after parameters.");
+        compiler.consume(TokenType::LEFT_BRACE, "Expect '{' before function body.");
+
+        compiler.block();
+
+        let function = compiler.end();
+
+        self.emit_constant(Value::Obj(function as *mut Obj));
     }
 
     fn var_declaration(&mut self) {
@@ -659,6 +795,10 @@ impl Compiler {
     }
 
     fn mark_initialized(&mut self) {
+        if self.scope_depth == 0 {
+            return;
+        }
+
         self.locals[self.local_count - 1].depth = Some(self.scope_depth);
     }
 
@@ -679,7 +819,7 @@ impl Compiler {
             return 0;
         }
 
-        self.identifier_constant(self.parser.previous)
+        self.identifier_constant(get_parser().previous)
     }
 
     fn declare_variable(&mut self) {
@@ -687,7 +827,7 @@ impl Compiler {
             return;
         }
 
-        let name = self.parser.previous;
+        let name = get_parser().previous;
 
         for i in (0..self.local_count).rev() {
             let local = self.locals[i];
@@ -754,14 +894,16 @@ impl Compiler {
     }
 
     fn synchronize(&mut self) {
-        self.parser.panic_mode = false;
+        let parser = get_parser();
 
-        while self.parser.current.typ != TokenType::EOF {
-            if self.parser.previous.typ == TokenType::SEMICOLON {
+        parser.panic_mode = false;
+
+        while parser.current.typ != TokenType::EOF {
+            if parser.previous.typ == TokenType::SEMICOLON {
                 return;
             }
 
-            match self.parser.current.typ {
+            match parser.current.typ {
                 TokenType::CLASS
                 | TokenType::FUN
                 | TokenType::VAR
@@ -795,6 +937,8 @@ impl Compiler {
             self.for_statement();
         } else if self.matches(TokenType::IF) {
             self.if_statement();
+        } else if self.matches(TokenType::RETURN) {
+            self.return_statement();
         } else if self.matches(TokenType::WHILE) {
             self.while_statement();
         } else if self.matches(TokenType::LEFT_BRACE) {
@@ -803,6 +947,20 @@ impl Compiler {
             self.end_scope();
         } else {
             self.expression_statement();
+        }
+    }
+
+    fn return_statement(&mut self) {
+        if self.typ == FunctionType::Script {
+            self.error("Can't return from top-level code.");
+        }
+
+        if self.matches(TokenType::SEMICOLON) {
+            self.emit_return();
+        } else {
+            self.expression();
+            self.consume(TokenType::SEMICOLON, "Expect ';' after return value.");
+            self.emit_byte(OpCode::OP_RETURN as u8);
         }
     }
 
@@ -825,12 +983,11 @@ impl Compiler {
     fn break_statement(&mut self) {
         if self.loop_scopes.is_empty() {
             self.error("'break' must be inside a loop.");
-            return;
         }
 
-        let (scope_depth) = {
+        let scope_depth = {
             let scope = self.loop_scopes.peek(0);
-            (scope.scope_depth)
+            scope.scope_depth
         };
 
         // Очищаем локальные переменные
@@ -853,7 +1010,6 @@ impl Compiler {
     fn continue_statement(&mut self) {
         if self.loop_scopes.is_empty() {
             self.error("'continue' must be inside a loop.");
-            return;
         }
 
         let (scope_depth, scope_start) = {
@@ -1058,13 +1214,13 @@ impl Compiler {
         self.emit_byte(OpCode::OP_PRINT as u8);
     }
 
-    pub fn compile(&mut self, source: *const u8, chunk: *mut Chunk) -> bool {
-        self.scanner = Some(Scanner::new(source));
+    pub fn compile(&mut self, source: *const u8) -> *mut ObjFunction {
+        let parser = get_parser();
 
-        self.current_chunk = chunk;
+        init_scanner(source);
 
-        self.parser.had_error = false;
-        self.parser.panic_mode = false;
+        parser.had_error = false;
+        parser.panic_mode = false;
 
         self.advance();
 
@@ -1072,8 +1228,12 @@ impl Compiler {
             self.declaration();
         }
 
-        self.end();
+        let function = self.end();
 
-        !self.parser.had_error
+        if parser.had_error {
+            return std::ptr::null_mut();
+        } else {
+            function
+        }
     }
 }

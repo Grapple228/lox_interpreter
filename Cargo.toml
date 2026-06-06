@@ -10,9 +10,10 @@ repository = "https://github.com/grapple228/interpreter.git"
 
 [lints.rust]
 # unsafe_code = "forbid"
-unused = { level = "allow", priority = -1 } # For exploratory dev.
+# unused = { level = "allow", priority = -1 } # For exploratory dev.
 
 [dependencies]
+rand = "0.10.1"
 # Tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -21,7 +22,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 name = "scanner_bench"
 harness = false
 
-# [profile.release]
+[profile.release]
 # strip = true           # удалить debug-символы
 # lto = true             # link-time optimization
 # opt-level = "z"        # оптимизация на размер

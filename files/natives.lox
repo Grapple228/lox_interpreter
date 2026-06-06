@@ -1,0 +1,11 @@
+print "random";
+print random(1, 10);
+print random(1, 10);
+print random(10, 20);
+
+print "clock";
+print clock();
+
+print "square";
+print square(3);
+print square(4);

@@ -5,7 +5,7 @@ use std::{
 };
 
 use interpreter::{
-    vm::{InterpretResult, Vm},
+    vm::{InterpretResult, ValueStack, Vm},
     Result,
 };
 
@@ -49,7 +49,10 @@ fn run_file(vm: &mut Vm, filename: &str) -> Result<()> {
     let source_cstring = std::ffi::CString::new(source).unwrap();
     let source_ptr = source_cstring.as_ptr() as *const u8;
 
-    match vm.interpret(source_ptr) {
+    let mut stack = ValueStack::new();
+    vm.init(&mut stack);
+
+    match vm.interpret(&mut stack, source_ptr) {
         InterpretResult::Ok => (),
         InterpretResult::CompileError => exit(65),
         InterpretResult::RuntimeError => exit(70),
@@ -77,7 +80,10 @@ fn repl(vm: &mut Vm) -> Result<()> {
         let source_cstring = std::ffi::CString::new(line.as_bytes()).unwrap();
         let source_ptr = source_cstring.as_ptr() as *const u8;
 
-        match vm.interpret(source_ptr) {
+        let mut stack = ValueStack::new();
+        vm.init(&mut stack);
+
+        match vm.interpret(&mut stack, source_ptr) {
             InterpretResult::Ok => (),
             InterpretResult::CompileError => exit(65),
             InterpretResult::RuntimeError => exit(70),

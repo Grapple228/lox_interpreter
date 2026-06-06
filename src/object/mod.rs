@@ -3,9 +3,11 @@ use std::alloc::{alloc, dealloc, Layout};
 use tracing::debug;
 
 mod function;
+mod native;
 mod string;
 
 pub use function::{FunctionType, ObjFunction};
+pub use native::{NativeFn, NativeResult, ObjNative};
 pub use string::ObjString;
 
 use crate::{common::Value, vm::Vm};
@@ -15,6 +17,7 @@ use crate::{common::Value, vm::Vm};
 pub enum ObjType {
     String = 1,
     Function = 2,
+    Native = 3,
 }
 
 impl std::fmt::Display for ObjType {
@@ -22,6 +25,7 @@ impl std::fmt::Display for ObjType {
         match self {
             Self::String => write!(f, "string"),
             Self::Function => write!(f, "func"),
+            Self::Native => write!(f, "native"),
         }
     }
 }
@@ -49,6 +53,10 @@ impl std::fmt::Display for Obj {
             ObjType::Function => {
                 let obj_func = self as *const Obj as *const ObjFunction;
                 unsafe { write!(f, "{}", &*obj_func) }
+            }
+            ObjType::Native => {
+                let obj_native = self as *const Obj as *const ObjNative;
+                unsafe { write!(f, "{}", &*obj_native) }
             }
         }
     }
@@ -109,19 +117,27 @@ impl Vm {
                     total_size
                 }
             }
-            ObjType::Function => {
-                unsafe {
-                    let function = obj as *mut ObjFunction;
-                    (*function).chunk.free();
+            ObjType::Function => unsafe {
+                let function = obj as *mut ObjFunction;
 
-                    let layout =
-                        Layout::from_size_align(size_of::<ObjFunction>(), align_of::<ObjString>())
-                            .unwrap();
-                    dealloc(function as *mut u8, layout);
-                };
+                let layout =
+                    Layout::from_size_align(size_of::<ObjFunction>(), align_of::<ObjFunction>())
+                        .unwrap();
+                dealloc(function as *mut u8, layout);
 
-                todo!()
-            }
+                layout.size()
+            },
+
+            ObjType::Native => unsafe {
+                let native = obj as *mut ObjNative;
+
+                let layout =
+                    Layout::from_size_align(size_of::<ObjNative>(), align_of::<ObjNative>())
+                        .unwrap();
+                dealloc(native as *mut u8, layout);
+
+                layout.size()
+            },
         }
     }
 

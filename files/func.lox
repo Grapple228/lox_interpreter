@@ -1,0 +1,15 @@
+fun a(value) { return b(value); }
+
+fun b(value) { return c(value * 2); }
+
+fun c(value) {
+    if(value % 2 == 0) {
+        print "odd";
+    } else {
+        print "even";
+    }
+
+    return value;
+}
+
+print a(4);

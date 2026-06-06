@@ -1,6 +1,7 @@
 // tests/performance_test.rs
-use interpreter::scanner::Scanner;
 use std::time::Instant;
+
+use interpreter::scanner::{init_scanner, scan_token};
 
 fn generate_large_file(size_mb: usize) -> String {
     let mut source = String::with_capacity(size_mb * 1024 * 1024);
@@ -45,11 +46,12 @@ fn benchmark_scan(mb: usize) {
     let source_cstring = std::ffi::CString::new(source).unwrap();
     let source_ptr = source_cstring.as_ptr() as *const u8;
 
+    init_scanner(source_ptr);
+
     // Warmup
     for _ in 0..3 {
-        let mut scanner = Scanner::new(source_ptr);
         loop {
-            let token = scanner.scan_token();
+            let token = scan_token();
             if token.typ == interpreter::token::TokenType::EOF {
                 break;
             }
@@ -59,10 +61,10 @@ fn benchmark_scan(mb: usize) {
     // Real benchmark
     let start = Instant::now();
     let mut token_count = 0;
-    let mut scanner = Scanner::new(source_ptr);
+    init_scanner(source_ptr);
 
     loop {
-        let token = scanner.scan_token();
+        let token = scan_token();
         token_count += 1;
         if token.typ == interpreter::token::TokenType::EOF {
             break;
@@ -94,18 +96,19 @@ fn benchmark_individual_tokens() {
         let source_cstring = std::ffi::CString::new(source).unwrap();
         let source_ptr = source_cstring.as_ptr() as *const u8;
 
+        init_scanner(source_ptr);
+
         // Warmup
         for _ in 0..1000 {
-            let mut scanner = Scanner::new(source_ptr);
-            scanner.scan_token();
+            scan_token();
         }
 
         let start = Instant::now();
         let iterations = 1_000_000;
 
         for _ in 0..iterations {
-            let mut scanner = Scanner::new(source_ptr);
-            std::hint::black_box(scanner.scan_token());
+            init_scanner(source_ptr);
+            std::hint::black_box(scan_token());
         }
 
         let duration = start.elapsed();

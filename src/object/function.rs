@@ -5,6 +5,7 @@ use crate::{
 };
 
 #[repr(u8)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum FunctionType {
     Function = 0,
     Script = 1,
@@ -13,12 +14,21 @@ pub enum FunctionType {
 #[repr(C)]
 pub struct ObjFunction {
     pub(super) obj: Obj,
-    pub(super) arity: usize,
+    pub arity: usize,
     pub(super) chunk: Chunk,
-    pub(super) name: *const ObjString,
+    pub name: *const ObjString,
 }
 
 impl ObjFunction {
+    pub fn arity(&self) -> usize {
+        self.arity
+    }
+
+    #[inline(always)]
+    pub fn name(&self) -> *const ObjString {
+        self.name
+    }
+
     pub fn new(vm: &mut Vm) -> *mut ObjFunction {
         let ptr = vm.allocate_obj(size_of::<ObjFunction>(), ObjType::Function) as *mut ObjFunction;
 
@@ -32,12 +42,16 @@ impl ObjFunction {
     }
 
     pub fn chunk(&mut self) -> *mut Chunk {
-        unsafe { &mut self.chunk as *mut Chunk }
+        &mut self.chunk as *mut Chunk
     }
 }
 
 impl std::fmt::Display for ObjFunction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.name.is_null() {
+            return write!(f, "<script>");
+        }
+
         let name = (unsafe { &*self.name }).as_str();
 
         write!(f, "<fn {}>", name)

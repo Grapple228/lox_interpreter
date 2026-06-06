@@ -1,13 +1,11 @@
 use std::{mem::MaybeUninit, ptr::NonNull};
 
-const STACK_MAX: usize = 256;
-
-pub struct Stack<T> {
-    values: Box<[MaybeUninit<T>; STACK_MAX]>, // На куче, чтобы не двигалась
+pub struct Stack<const MAX: usize, T> {
+    values: Box<[MaybeUninit<T>; MAX]>, // На куче, чтобы не двигалась
     top: NonNull<T>,
 }
 
-impl<T> Stack<T> {
+impl<const MAX: usize, T> Stack<MAX, T> {
     pub fn new() -> Self {
         // Выделяем массив на куче - он не переместится
         let values = Box::new(std::array::from_fn(|_| MaybeUninit::uninit()));
@@ -35,12 +33,36 @@ impl<T> Stack<T> {
         }
     }
 
+    pub fn set_top(&mut self, new_top: *mut T) {
+        unsafe {
+            let start = self.values.as_ptr() as *mut T;
+
+            // Проверяем, что new_top в пределах массива
+            let offset = new_top.offset_from(start);
+            if offset < 0 || offset as usize > MAX {
+                panic!("set_top: pointer out of bounds");
+            }
+
+            // Дропаем значения выше new_top
+            let old_len = self.len();
+            let new_len = offset as usize;
+
+            for i in new_len..old_len {
+                let ptr = start.add(i);
+                ptr.drop_in_place();
+            }
+
+            // Устанавливаем top
+            self.top = NonNull::new(new_top).unwrap();
+        }
+    }
+
     pub fn push(&mut self, value: T) {
         unsafe {
             let start = self.values.as_ptr() as *const T;
             let current_index = self.top.as_ptr().offset_from(start) as isize;
 
-            if current_index < 0 || current_index as usize >= STACK_MAX {
+            if current_index < 0 || current_index as usize >= MAX {
                 panic!("Stack overflow at index {}", current_index);
             }
 
@@ -104,9 +126,16 @@ impl<T> Stack<T> {
             self.top = NonNull::new(self.values.as_ptr() as *mut T).unwrap();
         }
     }
+
+    pub fn get_ptr(&self, index: usize) -> *const T {
+        unsafe {
+            let start = self.values.as_ptr() as *const T;
+            start.add(index)
+        }
+    }
 }
 
-impl<T: std::fmt::Display> Stack<T> {
+impl<const MAX: usize, T: std::fmt::Display> Stack<MAX, T> {
     pub fn debug_content(&self) {
         use std::fmt::Write;
 
@@ -144,7 +173,7 @@ impl<T: std::fmt::Display> Stack<T> {
     }
 }
 
-impl<T> Drop for Stack<T> {
+impl<const MAX: usize, T> Drop for Stack<MAX, T> {
     fn drop(&mut self) {
         self.reset();
     }

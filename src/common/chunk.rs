@@ -1,4 +1,4 @@
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::common::{
     dynamic_array::DynamicArray,
@@ -9,17 +9,11 @@ use crate::common::{
 
 pub struct Chunk {
     pub code: DynamicArray<u8>,
-    constants: DynamicArray<Value>,
+    pub constants: DynamicArray<Value>,
     lines: DynamicArray<LineRun>,
 }
 
 impl Chunk {
-    pub fn free(&mut self) {
-        self.code.free();
-        self.constants.free();
-        self.lines.free();
-    }
-
     pub fn count(&self) -> usize {
         self.code.count()
     }
@@ -110,6 +104,7 @@ impl Chunk {
             OpCode::OP_SET_GLOBAL => self.constant_instruction(op_code, offset),
             OpCode::OP_SET_LOCAL => self.byte_instruction(op_code, offset),
             OpCode::OP_GET_LOCAL => self.byte_instruction(op_code, offset),
+            OpCode::OP_CALL => self.byte_instruction(op_code, offset),
 
             OpCode::OP_JUMP => self.jump_instruction(op_code, 1, offset),
             OpCode::OP_JUMP_IF_FALSE => self.jump_instruction(op_code, 1, offset),
