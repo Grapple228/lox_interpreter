@@ -48,5 +48,6 @@ define_enum_with_values! {
         OP_LOOP = 24 => "OP_LOOP",
         OP_MOD = 25 => "OP_MOD",
         OP_CALL = 26 => "OP_CALL",
+        OP_CLOSURE = 27 => "OP_CLOSURE",
     }
 }

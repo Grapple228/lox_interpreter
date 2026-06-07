@@ -1,7 +1,10 @@
 // tests/performance_test.rs
 use std::time::Instant;
 
-use interpreter::scanner::{init_scanner, scan_token};
+use lox::{
+    scanner::{init_scanner, scan_token},
+    token::TokenType,
+};
 
 fn generate_large_file(size_mb: usize) -> String {
     let mut source = String::with_capacity(size_mb * 1024 * 1024);
@@ -52,7 +55,7 @@ fn benchmark_scan(mb: usize) {
     for _ in 0..3 {
         loop {
             let token = scan_token();
-            if token.typ == interpreter::token::TokenType::EOF {
+            if token.typ == TokenType::EOF {
                 break;
             }
         }
@@ -66,7 +69,7 @@ fn benchmark_scan(mb: usize) {
     loop {
         let token = scan_token();
         token_count += 1;
-        if token.typ == interpreter::token::TokenType::EOF {
+        if token.typ == TokenType::EOF {
             break;
         }
     }

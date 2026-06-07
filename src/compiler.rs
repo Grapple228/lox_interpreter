@@ -1,6 +1,6 @@
 use crate::{
     common::{Chunk, DynamicArray, OpCode, Stack, Value},
-    object::{FunctionType, Obj},
+    object::{FunctionType, Obj, ObjClosure},
     parser::get_parser,
     precedence::Precedence,
     scanner::{init_scanner, scan_token, scanner_line},
@@ -269,7 +269,7 @@ struct LoopScope {
 }
 
 pub struct CallFrame {
-    pub function: *mut ObjFunction,
+    pub closure: *mut ObjClosure,
     pub ip: *mut u8,
     pub slots: *mut Value,
 }
@@ -277,7 +277,7 @@ pub struct CallFrame {
 impl CallFrame {
     pub fn null() -> Self {
         Self {
-            function: std::ptr::null_mut(),
+            closure: std::ptr::null_mut(),
             ip: std::ptr::null_mut(),
             slots: std::ptr::null_mut(),
         }
@@ -389,9 +389,7 @@ impl Compiler {
 
     #[inline(always)]
     fn current_chunk(&self) -> &mut Chunk {
-        unsafe { &mut *(*self.function).chunk() }
-
-        // unsafe { &mut *self.current_chunk }
+        unsafe { &mut *(*self.function).chunk_mut() }
     }
 
     fn error(&mut self, message: &'static str) {
@@ -774,7 +772,10 @@ impl Compiler {
 
         let function = compiler.end();
 
-        self.emit_constant(Value::Obj(function as *mut Obj));
+        let constant = self
+            .current_chunk()
+            .add_constant(Value::Obj(function as *mut Obj));
+        self.emit_bytes(OpCode::OP_CLOSURE as u8, constant as u8);
     }
 
     fn var_declaration(&mut self) {

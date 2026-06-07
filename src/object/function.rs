@@ -41,8 +41,12 @@ impl ObjFunction {
         ptr
     }
 
-    pub fn chunk(&mut self) -> *mut Chunk {
+    pub fn chunk_mut(&mut self) -> *mut Chunk {
         &mut self.chunk as *mut Chunk
+    }
+
+    pub fn chunk(&self) -> *const Chunk {
+        &self.chunk as *const Chunk
     }
 }
 

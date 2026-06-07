@@ -4,14 +4,14 @@ use std::{
     process::exit,
 };
 
-use interpreter::{
+use lox::{
     vm::{InterpretResult, ValueStack, Vm},
     Result,
 };
 
 fn main() -> Result<()> {
     if cfg!(debug_assertions) {
-        interpreter::init()?;
+        lox::init()?;
     }
 
     let mut vm = Vm::new();

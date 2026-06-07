@@ -110,6 +110,23 @@ impl Chunk {
             OpCode::OP_JUMP_IF_FALSE => self.jump_instruction(op_code, 1, offset),
             OpCode::OP_LOOP => self.jump_instruction(op_code, -1, offset),
 
+            OpCode::OP_CLOSURE => {
+                let mut offset = offset + 1;
+
+                let constant = self.code[offset];
+
+                offset += 1;
+
+                println!(
+                    "{:16} {:4} {}",
+                    op_code.name(),
+                    constant,
+                    self.constants[constant as usize]
+                );
+
+                offset
+            }
+
             _ => Self::simple_instruction(op_code, offset),
         }
     }

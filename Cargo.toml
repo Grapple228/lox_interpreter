@@ -1,16 +1,16 @@
 [package]
-name = "interpreter"
+name = "lox"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = ""
 authors = ["grapple228 <greenapple228882@yandex.ru>"]
 readme = "readme.md"
-repository = "https://github.com/grapple228/interpreter.git"
+repository = "https://github.com/grapple228/lox.git"
 
 [lints.rust]
 # unsafe_code = "forbid"
-# unused = { level = "allow", priority = -1 } # For exploratory dev.
+unused = { level = "allow", priority = -1 } # For exploratory dev.
 
 [dependencies]
 rand = "0.10.1"

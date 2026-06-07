@@ -2,10 +2,12 @@ use std::alloc::{alloc, dealloc, Layout};
 
 use tracing::debug;
 
+mod closure;
 mod function;
 mod native;
 mod string;
 
+pub use closure::ObjClosure;
 pub use function::{FunctionType, ObjFunction};
 pub use native::{NativeFn, NativeResult, ObjNative};
 pub use string::ObjString;
@@ -18,6 +20,7 @@ pub enum ObjType {
     String = 1,
     Function = 2,
     Native = 3,
+    Closure = 4,
 }
 
 impl std::fmt::Display for ObjType {
@@ -26,6 +29,7 @@ impl std::fmt::Display for ObjType {
             Self::String => write!(f, "string"),
             Self::Function => write!(f, "func"),
             Self::Native => write!(f, "native"),
+            Self::Closure => write!(f, "closure"),
         }
     }
 }
@@ -57,6 +61,10 @@ impl std::fmt::Display for Obj {
             ObjType::Native => {
                 let obj_native = self as *const Obj as *const ObjNative;
                 unsafe { write!(f, "{}", &*obj_native) }
+            }
+            ObjType::Closure => {
+                let obj_closure = self as *const Obj as *const ObjClosure;
+                unsafe { write!(f, "{}", &*obj_closure) }
             }
         }
     }
@@ -124,6 +132,17 @@ impl Vm {
                     Layout::from_size_align(size_of::<ObjFunction>(), align_of::<ObjFunction>())
                         .unwrap();
                 dealloc(function as *mut u8, layout);
+
+                layout.size()
+            },
+
+            ObjType::Closure => unsafe {
+                let closure = obj as *mut ObjClosure;
+
+                let layout =
+                    Layout::from_size_align(size_of::<ObjClosure>(), align_of::<ObjClosure>())
+                        .unwrap();
+                dealloc(closure as *mut u8, layout);
 
                 layout.size()
             },
