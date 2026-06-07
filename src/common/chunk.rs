@@ -104,6 +104,9 @@ impl Chunk {
             OpCode::OP_SET_GLOBAL => self.constant_instruction(op_code, offset),
             OpCode::OP_SET_LOCAL => self.byte_instruction(op_code, offset),
             OpCode::OP_GET_LOCAL => self.byte_instruction(op_code, offset),
+            OpCode::OP_SET_UPVALUE => self.byte_instruction(op_code, offset),
+            OpCode::OP_GET_UPVALUE => self.byte_instruction(op_code, offset),
+
             OpCode::OP_CALL => self.byte_instruction(op_code, offset),
 
             OpCode::OP_JUMP => self.jump_instruction(op_code, 1, offset),
@@ -123,6 +126,22 @@ impl Chunk {
                     constant,
                     self.constants[constant as usize]
                 );
+
+                let function = self.constants[constant as usize].as_function();
+                let upvalue_count = unsafe { (*function).upvalue_count };
+
+                for _ in 0..upvalue_count {
+                    let is_local = self.code[offset];
+                    let index = self.code[offset + 1];
+
+                    println!(
+                        "{:4}      |                     {} {}",
+                        offset,
+                        if is_local == 1 { "local" } else { "upvalue" },
+                        index
+                    );
+                    offset += 2;
+                }
 
                 offset
             }

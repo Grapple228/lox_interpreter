@@ -49,5 +49,8 @@ define_enum_with_values! {
         OP_MOD = 25 => "OP_MOD",
         OP_CALL = 26 => "OP_CALL",
         OP_CLOSURE = 27 => "OP_CLOSURE",
+        OP_GET_UPVALUE = 28 => "OP_GET_UPVALUE",
+        OP_SET_UPVALUE = 29 => "OP_SET_UPVALUE",
+        OP_CLOSE_UPVALUE = 30 => "OP_CLOSE_UPVALUE",
     }
 }

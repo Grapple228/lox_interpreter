@@ -3,9 +3,9 @@
 use crate::{
     common::{OpCode, Stack, Value},
     compiler::{CallFrame, Compiler},
-    object::{FunctionType, NativeFn, NativeResult, ObjClosure, ObjNative},
+    object::{FunctionType, NativeFn, NativeResult, ObjClosure, ObjNative, ObjUpValue},
     table::Table,
-    Obj, ObjFunction, ObjString, ObjType,
+    Obj, ObjString, ObjType,
 };
 
 mod natives;
@@ -38,6 +38,9 @@ pub struct Vm {
 
     pub strings: Table,
     pub globals: Table,
+
+    open_upvalues: *mut ObjUpValue,
+
     frame_count: usize,
 }
 
@@ -49,6 +52,8 @@ impl Vm {
             bytes_allocated: 0,
             strings: Table::new(),
             globals: Table::new(),
+
+            open_upvalues: std::ptr::null_mut(),
         }
     }
 
@@ -264,6 +269,45 @@ impl Vm {
         stack.pop();
     }
 
+    fn capture_upvalue(&mut self, local: *mut Value) -> *mut ObjUpValue {
+        let mut prev_upvalue = std::ptr::null_mut();
+        let mut upvalue = self.open_upvalues;
+
+        unsafe {
+            while !upvalue.is_null() && (*upvalue).location > local {
+                prev_upvalue = upvalue;
+                upvalue = (*upvalue).next;
+            }
+
+            if !upvalue.is_null() && (*upvalue).location == local {
+                return upvalue;
+            }
+        }
+
+        let created_upvalue = ObjUpValue::new(self, local);
+
+        if prev_upvalue.is_null() {
+            self.open_upvalues = created_upvalue;
+        } else {
+            unsafe {
+                (*prev_upvalue).next = created_upvalue;
+            }
+        }
+
+        created_upvalue
+    }
+
+    fn close_upvalues(&mut self, last: *mut Value) {
+        unsafe {
+            while !self.open_upvalues.is_null() && (*self.open_upvalues).location >= last {
+                let upvalue = self.open_upvalues;
+                (*upvalue).closed = *(*upvalue).location;
+                (*upvalue).location = &mut (*upvalue).closed;
+                self.open_upvalues = (*upvalue).next;
+            }
+        }
+    }
+
     fn run(&mut self, frames: &mut Frames, stack: &mut ValueStack) -> InterpretResult {
         let mut frame = &mut frames[self.frame_count - 1];
 
@@ -300,6 +344,27 @@ impl Vm {
 
                 OpCode::OP_POP => {
                     _ = stack.pop();
+                }
+
+                OpCode::OP_GET_UPVALUE => {
+                    let slot = Self::read_byte(frame) as usize;
+                    unsafe {
+                        let value = (**(*frame.closure).upvalues.add(slot)).location;
+                        stack.push(*value);
+                    }
+                }
+
+                OpCode::OP_SET_UPVALUE => {
+                    let slot = Self::read_byte(frame) as usize;
+                    unsafe {
+                        let upvalue = *(*frame.closure).upvalues.add(slot);
+                        *(*upvalue).location = *stack.peek(0);
+                    }
+                }
+
+                OpCode::OP_CLOSE_UPVALUE => {
+                    self.close_upvalues(stack.get_ptr(stack.len() - 1) as *mut Value);
+                    stack.pop();
                 }
 
                 OpCode::OP_GET_LOCAL => {
@@ -364,6 +429,9 @@ impl Vm {
 
                 OpCode::OP_RETURN => {
                     let result = stack.pop();
+
+                    self.close_upvalues(frame.slots);
+
                     self.frame_count -= 1;
 
                     if self.frame_count == 0 {
@@ -378,7 +446,22 @@ impl Vm {
                 OpCode::OP_CLOSURE => {
                     let function = Self::read_constant(frame).as_function();
                     let closure = ObjClosure::new(self, function);
-                    stack.push(Value::Obj(closure as *mut Obj))
+                    stack.push(Value::Obj(closure as *mut Obj));
+
+                    unsafe {
+                        for i in 0..(*closure).upvalue_count {
+                            let is_local = Self::read_byte(frame);
+                            let index = Self::read_byte(frame);
+
+                            if is_local == 1 {
+                                let upvalue = self.capture_upvalue(frame.slots.add(index as usize));
+                                *(*closure).upvalues.add(i) = upvalue;
+                            } else {
+                                let upvalue = *(*frame.closure).upvalues.add(index as usize);
+                                *(*closure).upvalues.add(i) = upvalue;
+                            }
+                        }
+                    }
                 }
 
                 OpCode::OP_CONSTANT => {
@@ -519,7 +602,7 @@ impl Vm {
     }
 
     pub fn interpret(&mut self, stack: &mut ValueStack, source: *const u8) -> InterpretResult {
-        let mut compiler = Compiler::new(self, FunctionType::Script);
+        let mut compiler = Compiler::new(self, FunctionType::Script, std::ptr::null_mut());
 
         let function = compiler.compile(source);
         if function.is_null() {

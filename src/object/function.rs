@@ -5,7 +5,7 @@ use crate::{
 };
 
 #[repr(u8)]
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum FunctionType {
     Function = 0,
     Script = 1,
@@ -15,6 +15,7 @@ pub enum FunctionType {
 pub struct ObjFunction {
     pub(super) obj: Obj,
     pub arity: usize,
+    pub upvalue_count: usize,
     pub(super) chunk: Chunk,
     pub name: *const ObjString,
 }
@@ -34,6 +35,7 @@ impl ObjFunction {
 
         unsafe {
             (*ptr).arity = 0;
+            (*ptr).upvalue_count = 0;
             (*ptr).name = std::ptr::null();
             (*ptr).chunk = Chunk::new();
         }

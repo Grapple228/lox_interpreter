@@ -6,11 +6,13 @@ mod closure;
 mod function;
 mod native;
 mod string;
+mod upvalue;
 
 pub use closure::ObjClosure;
 pub use function::{FunctionType, ObjFunction};
 pub use native::{NativeFn, NativeResult, ObjNative};
 pub use string::ObjString;
+pub use upvalue::ObjUpValue;
 
 use crate::{common::Value, vm::Vm};
 
@@ -21,6 +23,7 @@ pub enum ObjType {
     Function = 2,
     Native = 3,
     Closure = 4,
+    UpValue = 5,
 }
 
 impl std::fmt::Display for ObjType {
@@ -30,6 +33,7 @@ impl std::fmt::Display for ObjType {
             Self::Function => write!(f, "func"),
             Self::Native => write!(f, "native"),
             Self::Closure => write!(f, "closure"),
+            Self::UpValue => write!(f, "upvalue"),
         }
     }
 }
@@ -66,6 +70,10 @@ impl std::fmt::Display for Obj {
                 let obj_closure = self as *const Obj as *const ObjClosure;
                 unsafe { write!(f, "{}", &*obj_closure) }
             }
+            ObjType::UpValue => {
+                let obj_upvalue = self as *const Obj as *const ObjUpValue;
+                unsafe { write!(f, "{}", &*obj_upvalue) }
+            }
         }
     }
 }
@@ -84,6 +92,16 @@ impl Value {
 }
 
 impl Vm {
+    pub fn allocate_array<T>(&mut self, count: usize) -> *mut T {
+        let size = size_of::<T>() * count;
+        let layout = Layout::from_size_align(size, align_of::<T>()).unwrap();
+        let ptr = unsafe { alloc(layout) };
+
+        self.bytes_allocated += layout.size();
+
+        ptr as *mut T
+    }
+
     fn allocate(&mut self, size: usize) -> *mut u8 {
         let layout = Layout::from_size_align(size, 1).unwrap();
         let ptr = unsafe { alloc(layout) };
@@ -136,15 +154,38 @@ impl Vm {
                 layout.size()
             },
 
+            ObjType::UpValue => unsafe {
+                let upvalue = obj as *mut ObjUpValue;
+
+                let layout =
+                    Layout::from_size_align(size_of::<ObjUpValue>(), align_of::<ObjUpValue>())
+                        .unwrap();
+                dealloc(upvalue as *mut u8, layout);
+
+                layout.size()
+            },
+
             ObjType::Closure => unsafe {
                 let closure = obj as *mut ObjClosure;
+                let mut total_size = 0;
 
+                // Освобождаем массив upvalues
+                if (*closure).upvalue_count > 0 {
+                    let array_size = size_of::<*mut ObjUpValue>() * (*closure).upvalue_count;
+                    let array_layout =
+                        Layout::from_size_align(array_size, align_of::<*mut ObjUpValue>()).unwrap();
+                    dealloc((*closure).upvalues as *mut u8, array_layout);
+                    total_size += array_size;
+                }
+
+                // Освобождаем сам ObjClosure
                 let layout =
                     Layout::from_size_align(size_of::<ObjClosure>(), align_of::<ObjClosure>())
                         .unwrap();
                 dealloc(closure as *mut u8, layout);
+                total_size += layout.size();
 
-                layout.size()
+                total_size
             },
 
             ObjType::Native => unsafe {

@@ -1,9 +1,35 @@
-var x = "global";
-fun outer() {
-  var x = "outer";
-  fun inner() {
-    print x;
-  }
-  inner();
+var globalSet;
+var globalGet;
+
+fun init(initial) {
+  var a = initial;
+
+  fun set(value) { a = value; }
+  fun get() { return a; }
+
+  globalSet = set;
+  globalGet = get;
 }
-outer();
+
+init(nil);
+print globalGet();
+globalSet(3);
+print globalGet();
+globalSet(4);
+print globalGet();
+
+fun make_counter() {
+    var c = 0;
+
+    fun count(){
+        c = c + 1;
+        return c;
+    }
+
+    return count;
+}
+
+var counter = make_counter();
+while(counter() < 5) {
+    print "work";
+}

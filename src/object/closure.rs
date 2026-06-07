@@ -1,26 +1,39 @@
-use crate::{common::Value, vm::Vm, Obj, ObjFunction, ObjType};
+use crate::{common::Value, object::ObjUpValue, vm::Vm, Obj, ObjFunction, ObjType};
 
 #[repr(C)]
 pub struct ObjClosure {
     obj: Obj,
     pub function: *mut ObjFunction,
+    pub upvalues: *mut *mut ObjUpValue,
+    pub upvalue_count: usize,
 }
 
 impl ObjClosure {
     pub fn new(vm: &mut Vm, function: *mut ObjFunction) -> *mut ObjClosure {
-        let ptr = vm.allocate_obj(size_of::<ObjClosure>(), ObjType::Closure) as *mut ObjClosure;
-
         unsafe {
-            (*ptr).function = function;
-        }
+            let upvalue_count = (*function).upvalue_count;
 
-        ptr
+            // Выделяем память под массив указателей на upvalues
+            let upvalues = if upvalue_count > 0 {
+                vm.allocate_array::<*mut ObjUpValue>(upvalue_count)
+            } else {
+                std::ptr::null_mut()
+            };
+
+            let ptr = vm.allocate_obj(size_of::<ObjClosure>(), ObjType::Closure) as *mut ObjClosure;
+
+            (*ptr).function = function;
+            (*ptr).upvalues = upvalues;
+            (*ptr).upvalue_count = upvalue_count;
+
+            ptr
+        }
     }
 }
 
 impl std::fmt::Display for ObjClosure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", unsafe { (&*self.function) })
+        write!(f, "{}", unsafe { &*self.function })
     }
 }
 

@@ -10,8 +10,9 @@ use crate::{
         TokenType::{self},
     },
     vm::Vm,
-    ObjFunction,
 };
+
+use crate::ObjFunction;
 
 type ParseFn = fn(&mut Compiler, bool);
 
@@ -250,6 +251,7 @@ const U8_COUNT: usize = u8::MAX as usize + 1;
 struct Local {
     name: Token,
     depth: Option<usize>,
+    is_captured: bool,
 }
 
 impl Local {
@@ -257,15 +259,16 @@ impl Local {
         Self {
             name: Token::empty(),
             depth: None,
+            is_captured: false,
         }
     }
 }
 
 struct LoopScope {
-    start: usize,             // начало цикла (куда прыгать на continue)
-    exit_jump: Option<usize>, // выход для break (будет заполнен позже)
-    scope_depth: usize,       // глубина области видимости
-    has_increment: bool,      // true для for, false для while
+    start: usize,
+    exit_jump: Option<usize>,
+    scope_depth: usize,
+    has_increment: bool,
 }
 
 pub struct CallFrame {
@@ -284,15 +287,18 @@ impl CallFrame {
     }
 }
 
-static mut CURRENT: *mut Compiler = std::ptr::null_mut();
-
-fn current_compiler() -> *mut Compiler {
-    unsafe { CURRENT }
+#[derive(Debug, Clone, Copy)]
+struct UpValue {
+    index: usize,
+    is_local: bool,
 }
 
-fn set_current_compiler(compiler: *mut Compiler) {
-    unsafe {
-        CURRENT = compiler;
+impl UpValue {
+    pub fn new() -> Self {
+        Self {
+            index: 0,
+            is_local: false,
+        }
     }
 }
 
@@ -301,6 +307,7 @@ pub struct Compiler {
     vars_cache: Table,
 
     locals: [Local; U8_COUNT],
+    upvalues: [UpValue; U8_COUNT],
     local_count: usize,
     scope_depth: usize,
 
@@ -314,16 +321,14 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    pub fn new(vm: *mut Vm, typ: FunctionType) -> Self {
-        let enclosing = current_compiler();
-
-        let mut compiler = Self {
+    pub fn new(vm: *mut Vm, typ: FunctionType, enclosing: *mut Compiler) -> Box<Self> {
+        let mut compiler = Box::new(Self {
             vars_cache: Table::new(),
 
             local_count: 0,
             scope_depth: 0,
             locals: [Local::empty(); U8_COUNT],
-
+            upvalues: [UpValue::new(); U8_COUNT],
             loop_scopes: Stack::new(),
             break_jumps: DynamicArray::new(),
 
@@ -332,9 +337,7 @@ impl Compiler {
             vm,
 
             enclosing,
-        };
-
-        set_current_compiler(&mut compiler);
+        });
 
         if typ != FunctionType::Script {
             let parser = get_parser();
@@ -344,33 +347,25 @@ impl Compiler {
             };
         }
 
-        let local = &mut compiler.locals[0];
-        local.depth = Some(0);
-        local.name.start = "".as_ptr();
-        local.name.length = 0;
-
-        compiler.local_count += 1;
+        compiler.locals[0].depth = Some(0);
+        compiler.locals[0].name.start = "".as_ptr();
+        compiler.locals[0].name.length = 0;
+        compiler.local_count = 1;
 
         compiler
     }
 
     fn error_at(&mut self, token: Token, message: &'static str) {
         let parser = get_parser();
-
         if parser.panic_mode {
             return;
         }
         parser.panic_mode = true;
 
         eprint!("[line {}] Error", token.line);
-
         match token.typ {
-            TokenType::EOF => {
-                eprint!(" at end");
-            }
-            TokenType::ERROR => {
-                // Nothing
-            }
+            TokenType::EOF => eprint!(" at end"),
+            TokenType::ERROR => {}
             _ => {
                 let lexeme = unsafe {
                     std::str::from_utf8_unchecked(std::slice::from_raw_parts(
@@ -434,14 +429,11 @@ impl Compiler {
 
     fn emit_constant(&mut self, value: Value) -> usize {
         let line = scanner_line();
-        let chunk = self.current_chunk();
-        chunk.write_constant(value, line)
+        self.current_chunk().write_constant(value, line)
     }
 
     fn emit_byte(&mut self, byte: u8) {
-        let line = get_parser().previous.line;
-        let chunk = self.current_chunk();
-        chunk.write(byte, line);
+        self.current_chunk().write(byte, get_parser().previous.line);
     }
 
     fn emit_bytes(&mut self, byte1: u8, byte2: u8) {
@@ -476,23 +468,19 @@ impl Compiler {
 
     fn end(&mut self) -> *mut ObjFunction {
         self.emit_return();
+
         let function = self.function;
 
-        if cfg!(debug_assertions) {
-            if !get_parser().had_error {
-                let name = unsafe {
-                    if !(*function).name().is_null() {
-                        (*(*function).name()).as_str()
-                    } else {
-                        "<script>"
-                    }
-                };
-
-                self.current_chunk().disassemble(name);
-            }
+        if cfg!(debug_assertions) && !get_parser().had_error {
+            let name = unsafe {
+                if !(*function).name().is_null() {
+                    (*(*function).name()).as_str()
+                } else {
+                    "<script>"
+                }
+            };
+            self.current_chunk().disassemble(name);
         }
-
-        set_current_compiler(self.enclosing);
 
         function
     }
@@ -533,6 +521,7 @@ impl Compiler {
     fn binary(&mut self, _can_assign: bool) {
         let operator_type = get_parser().previous.typ;
         let rule = get_rule(operator_type);
+
         self.parse_precedence(rule.precedence.next());
 
         match operator_type {
@@ -554,26 +543,19 @@ impl Compiler {
             TokenType::LESS_EQUAL => {
                 self.emit_bytes(OpCode::OP_GREATER as u8, OpCode::OP_NOT as u8)
             }
-
-            _ => unreachable!("Should not reach here"),
+            _ => unreachable!(),
         }
     }
 
     fn unary(&mut self, _can_assign: bool) {
         let operator_type = get_parser().previous.typ;
 
-        // Compile the operand.
         self.parse_precedence(Precedence::UNARY);
 
-        // Emit the operator instruction.
         match operator_type {
-            TokenType::MINUS => {
-                self.emit_byte(OpCode::OP_NEGATE as u8);
-            }
-            TokenType::BANG => {
-                self.emit_byte(OpCode::OP_NOT as u8);
-            }
-            _ => unreachable!("Should not reach here"),
+            TokenType::MINUS => self.emit_byte(OpCode::OP_NEGATE as u8),
+            TokenType::BANG => self.emit_byte(OpCode::OP_NOT as u8),
+            _ => unreachable!(),
         }
     }
 
@@ -584,16 +566,10 @@ impl Compiler {
 
     fn literal(&mut self, _can_assign: bool) {
         match get_parser().previous.typ {
-            TokenType::FALSE => {
-                self.emit_byte(OpCode::OP_FALSE as u8);
-            }
-            TokenType::TRUE => {
-                self.emit_byte(OpCode::OP_TRUE as u8);
-            }
-            TokenType::NIL => {
-                self.emit_byte(OpCode::OP_NIL as u8);
-            }
-            _ => unreachable!("Should not reach here"),
+            TokenType::FALSE => self.emit_byte(OpCode::OP_FALSE as u8),
+            TokenType::TRUE => self.emit_byte(OpCode::OP_TRUE as u8),
+            TokenType::NIL => self.emit_byte(OpCode::OP_NIL as u8),
+            _ => unreachable!(),
         }
     }
 
@@ -604,17 +580,15 @@ impl Compiler {
         let length = parser.previous.length - 2;
 
         let obj_string = unsafe { (*self.vm).copy_string(chars, length) };
-        let value = Value::Obj(obj_string as *mut Obj);
-        self.emit_constant(value);
+        self.emit_constant(Value::Obj(obj_string as *mut Obj));
     }
 
     fn number(&mut self, _can_assign: bool) {
         let parser = get_parser();
-
-        let num = parser.previous.as_f64().unwrap_or_else(|| {
-            panic!("Invalid number at line {}", parser.previous.line);
-        });
-
+        let num = parser
+            .previous
+            .as_f64()
+            .unwrap_or_else(|| panic!("Invalid number at line {}", parser.previous.line));
         self.emit_constant(Value::Number(num));
     }
 
@@ -645,6 +619,7 @@ impl Compiler {
     fn resolve_local(&mut self, name: Token) -> Option<usize> {
         for i in (0..self.local_count).rev() {
             let local = self.locals[i];
+
             if Self::identifiers_equal(name, local.name) {
                 if local.depth.is_none() {
                     self.error("Can't read local variable in its own initializer.");
@@ -658,14 +633,65 @@ impl Compiler {
         None
     }
 
-    fn named_variable(&mut self, name: Token, can_assign: bool) {
-        let (get_op, set_op, arg) = match self.resolve_local(name) {
-            Some(arg) => (OpCode::OP_GET_LOCAL, OpCode::OP_SET_LOCAL, arg),
-            None => {
-                let arg = self.identifier_constant(name);
-                (OpCode::OP_GET_GLOBAL, OpCode::OP_SET_GLOBAL, arg)
+    fn add_upvalue(&mut self, index: usize, is_local: bool) -> usize {
+        let upvalue_count = unsafe { (*self.function).upvalue_count };
+
+        for i in 0..upvalue_count {
+            let upvalue = self.upvalues[i];
+            if upvalue.index == index && upvalue.is_local == is_local {
+                return i;
             }
-        };
+        }
+
+        if upvalue_count == U8_COUNT {
+            self.error("Too many variables in function.");
+            return 0;
+        }
+
+        self.upvalues[upvalue_count].is_local = is_local;
+        self.upvalues[upvalue_count].index = index;
+
+        unsafe {
+            (*self.function).upvalue_count = upvalue_count + 1;
+        }
+
+        upvalue_count
+    }
+
+    fn resolve_upvalue(&mut self, name: Token) -> Option<usize> {
+        if self.enclosing.is_null() {
+            return None;
+        }
+
+        let compiler = unsafe { &mut *self.enclosing };
+
+        if let Some(local) = compiler.resolve_local(name) {
+            compiler.locals[local].is_captured = true;
+
+            return Some(self.add_upvalue(local, true));
+        }
+
+        if let Some(upvalue) = compiler.resolve_upvalue(name) {
+            return Some(self.add_upvalue(upvalue, false));
+        }
+        None
+    }
+
+    fn get_variable_ops(&mut self, name: Token) -> (OpCode, OpCode, usize) {
+        if let Some(arg) = self.resolve_local(name) {
+            return (OpCode::OP_GET_LOCAL, OpCode::OP_SET_LOCAL, arg);
+        }
+
+        if let Some(arg) = self.resolve_upvalue(name) {
+            return (OpCode::OP_GET_UPVALUE, OpCode::OP_SET_UPVALUE, arg);
+        }
+
+        let arg = self.identifier_constant(name);
+        (OpCode::OP_GET_GLOBAL, OpCode::OP_SET_GLOBAL, arg)
+    }
+
+    fn named_variable(&mut self, name: Token, can_assign: bool) {
+        let (get_op, set_op, arg) = self.get_variable_ops(name);
 
         if can_assign && self.matches(TokenType::EQUAL) {
             self.expression();
@@ -740,8 +766,7 @@ impl Compiler {
     }
 
     fn function(&mut self, typ: FunctionType) {
-        let mut compiler = Compiler::new(self.vm, typ);
-
+        let mut compiler = Compiler::new(self.vm, typ, &mut *self as *mut Compiler);
         compiler.begin_scope();
 
         compiler.consume(TokenType::LEFT_PAREN, "Expect '(' after function name.");
@@ -750,17 +775,14 @@ impl Compiler {
             loop {
                 unsafe {
                     (*compiler.function).arity += 1;
-
-                    if (*compiler.function).arity > 255 {
-                        compiler.error_at_current("Can't have more than 255 parameters.");
-                    }
-
-                    let constant = compiler.parse_variable("Expect parameter name.");
-
-                    compiler.define_variable(constant);
-                    if !compiler.matches(TokenType::COMMA) {
-                        break;
-                    }
+                }
+                if unsafe { (*compiler.function).arity } > 255 {
+                    compiler.error_at_current("Can't have more than 255 parameters.");
+                }
+                let constant = compiler.parse_variable("Expect parameter name.");
+                compiler.define_variable(constant);
+                if !compiler.matches(TokenType::COMMA) {
+                    break;
                 }
             }
         }
@@ -776,6 +798,11 @@ impl Compiler {
             .current_chunk()
             .add_constant(Value::Obj(function as *mut Obj));
         self.emit_bytes(OpCode::OP_CLOSURE as u8, constant as u8);
+        let upvalue_count = unsafe { (*function).upvalue_count };
+        for i in 0..upvalue_count {
+            self.emit_byte(if compiler.upvalues[i].is_local { 1 } else { 0 });
+            self.emit_byte(compiler.upvalues[i].index as u8);
+        }
     }
 
     fn var_declaration(&mut self) {
@@ -865,7 +892,11 @@ impl Compiler {
             return;
         }
 
-        self.locals[self.local_count] = Local { name, depth: None };
+        self.locals[self.local_count] = Local {
+            name,
+            depth: None,
+            is_captured: false,
+        };
         self.local_count += 1;
     }
 
@@ -912,13 +943,8 @@ impl Compiler {
                 | TokenType::IF
                 | TokenType::WHILE
                 | TokenType::PRINT
-                | TokenType::RETURN => {
-                    return;
-                }
-
-                _ => {
-                    // Nothing
-                }
+                | TokenType::RETURN => return,
+                _ => {}
             }
 
             self.advance();
@@ -971,9 +997,12 @@ impl Compiler {
             let (jump_offset, saved_scope_idx) = self.break_jumps[i];
             if saved_scope_idx == scope_idx {
                 let jump = exit_offset - jump_offset - 2;
-                let chunk = self.current_chunk();
-                chunk.code.set(jump_offset, ((jump >> 8) & 0xff) as u8);
-                chunk.code.set(jump_offset + 1, (jump & 0xff) as u8);
+                self.current_chunk()
+                    .code
+                    .set(jump_offset, ((jump >> 8) & 0xff) as u8);
+                self.current_chunk()
+                    .code
+                    .set(jump_offset + 1, (jump & 0xff) as u8);
                 self.break_jumps.remove(i);
             } else {
                 i += 1;
@@ -985,13 +1014,7 @@ impl Compiler {
         if self.loop_scopes.is_empty() {
             self.error("'break' must be inside a loop.");
         }
-
-        let scope_depth = {
-            let scope = self.loop_scopes.peek(0);
-            scope.scope_depth
-        };
-
-        // Очищаем локальные переменные
+        let scope_depth = self.loop_scopes.peek(0).scope_depth;
         while self.local_count > 0 {
             let local = self.locals[self.local_count - 1];
             if local.depth.unwrap_or(0) <= scope_depth {
@@ -1037,7 +1060,7 @@ impl Compiler {
 
         let scope_idx = self.loop_scopes.len();
         self.loop_scopes.push(LoopScope {
-            start: 0, // временно
+            start: 0,
             exit_jump: None,
             scope_depth: self.scope_depth,
             has_increment: false,
@@ -1076,17 +1099,11 @@ impl Compiler {
 
             self.emit_loop(loop_start);
             loop_start = increment_start;
-
-            {
-                let scope = self.loop_scopes.peek_mut(0);
-                scope.start = increment_start; // continue прыгает на инкремент
-                scope.has_increment = true;
-            }
-
+            self.loop_scopes.peek_mut(0).start = increment_start;
+            self.loop_scopes.peek_mut(0).has_increment = true;
             self.patch_jump(body_jump);
         } else {
-            let scope = self.loop_scopes.peek_mut(0);
-            scope.start = loop_start; // continue прыгает на условие
+            self.loop_scopes.peek_mut(0).start = loop_start;
         }
 
         self.statement();
@@ -1094,13 +1111,11 @@ impl Compiler {
 
         if let Some(exit_jump) = exit_jump {
             self.patch_jump(exit_jump);
-            self.emit_byte(OpCode::OP_POP as u8); // Condition
+            self.emit_byte(OpCode::OP_POP as u8);
         }
 
         let count = self.current_chunk().count();
-        let scope = self.loop_scopes.peek_mut(0);
-        scope.exit_jump = Some(count);
-
+        self.loop_scopes.peek_mut(0).exit_jump = Some(count);
         self.patch_breaks(scope_idx, count);
         self.loop_scopes.pop();
 
@@ -1135,10 +1150,7 @@ impl Compiler {
 
         // Обновляем exit_jump для break
         let count = self.current_chunk().count();
-
-        let scope = self.loop_scopes.peek_mut(0);
-        scope.exit_jump = Some(count);
-
+        self.loop_scopes.peek_mut(0).exit_jump = Some(count);
         self.loop_scopes.pop();
         self.patch_breaks(scope_idx, count);
     }
@@ -1171,10 +1183,12 @@ impl Compiler {
         if jump > u16::MAX as usize {
             self.error("Too much code to jump over");
         }
-
-        let chunk = self.current_chunk();
-        chunk.code.set(offset, ((jump >> 8) & 0xff) as u8);
-        chunk.code.set(offset + 1, (jump & 0xff) as u8);
+        self.current_chunk()
+            .code
+            .set(offset, ((jump >> 8) & 0xff) as u8);
+        self.current_chunk()
+            .code
+            .set(offset + 1, (jump & 0xff) as u8);
     }
 
     fn begin_scope(&mut self) {
@@ -1186,8 +1200,14 @@ impl Compiler {
 
         while self.local_count > 0 {
             let local = self.locals[self.local_count - 1];
+
             if local.depth.unwrap_or(0) > self.scope_depth {
-                self.emit_byte(OpCode::OP_POP as u8);
+                if local.is_captured {
+                    self.emit_byte(OpCode::OP_CLOSE_UPVALUE as u8);
+                } else {
+                    self.emit_byte(OpCode::OP_POP as u8);
+                }
+
                 self.local_count -= 1;
             } else {
                 break;
@@ -1232,7 +1252,7 @@ impl Compiler {
         let function = self.end();
 
         if parser.had_error {
-            return std::ptr::null_mut();
+            std::ptr::null_mut()
         } else {
             function
         }
