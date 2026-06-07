@@ -2,10 +2,10 @@
 
 use crate::{
     common::{OpCode, Stack, Value},
-    compiler::{CallFrame, Compiler},
+    compiler::{CallFrame, Callee, Compiler},
     object::{FunctionType, NativeFn, NativeResult, ObjClosure, ObjNative, ObjUpValue},
     table::Table,
-    Obj, ObjString, ObjType,
+    Obj, ObjFunction, ObjString, ObjType,
 };
 
 mod natives;
@@ -73,7 +73,13 @@ impl Vm {
         for i in (0..self.frame_count).rev() {
             let frame = &frames[i];
             unsafe {
-                let function = &*(*frame.closure).function;
+                let function_ptr = frame.function();
+                if function_ptr.is_null() {
+                    eprintln!("[unknown location]");
+                    continue;
+                }
+
+                let function = &*frame.function();
 
                 let chunk = function.chunk();
                 let instruction = frame.ip.offset_from((*chunk).get_code_ptr()) as usize - 1;
@@ -112,7 +118,8 @@ impl Vm {
     fn read_constant(frame: &mut CallFrame) -> Value {
         let idx = Self::read_byte(frame) as usize;
         unsafe {
-            let chunk = (*(*frame.closure).function).chunk();
+            let function = frame.function();
+            let chunk = (*function).chunk();
             *(*chunk).constants.get(idx).expect("Constant not found")
         }
     }
@@ -123,7 +130,8 @@ impl Vm {
         let b2 = Self::read_byte(frame) as usize;
         let idx = b0 | (b1 << 8) | (b2 << 16);
         unsafe {
-            let chunk = (*(*frame.closure).function).chunk();
+            let function = frame.function();
+            let chunk = (*function).chunk();
             *(*chunk).constants.get(idx).expect("Constant not found")
         }
     }
@@ -154,11 +162,11 @@ impl Vm {
         }
     }
 
-    fn call(
+    fn call_function(
         &mut self,
         frames: &mut Frames,
         stack: &mut ValueStack,
-        closure: *mut ObjClosure,
+        function: *mut ObjFunction,
         arg_count: usize,
     ) -> bool {
         unsafe {
@@ -167,7 +175,7 @@ impl Vm {
                 return false;
             }
 
-            let arity = (*(*closure).function).arity();
+            let arity = (*function).arity();
             if arg_count != arity {
                 self.runtime_error(
                     frames,
@@ -180,14 +188,29 @@ impl Vm {
             let frame = &mut frames[self.frame_count];
             self.frame_count += 1;
 
-            frame.closure = closure;
-            frame.ip = (*(*(*closure).function).chunk()).get_code_mut_ptr();
+            frame.callee = Callee::Function(function);
+            frame.ip = (*(*function).chunk()).get_code_mut_ptr();
 
             let stack_top = stack.len();
             frame.slots = stack.get_ptr(stack_top - arg_count - 1) as *mut Value;
 
             true
         }
+    }
+
+    fn call_closure(
+        &mut self,
+        frames: &mut Frames,
+        stack: &mut ValueStack,
+        closure: *mut ObjClosure,
+        arg_count: usize,
+    ) -> bool {
+        if !self.call_function(frames, stack, unsafe { (*closure).function }, arg_count) {
+            return false;
+        }
+        let frame = &mut frames[self.frame_count - 1];
+        frame.callee = Callee::Closure(closure);
+        true
     }
 
     fn call_value(
@@ -200,7 +223,10 @@ impl Vm {
         if callee.is_obj() {
             match unsafe { (*callee.as_obj()).typ() } {
                 ObjType::Closure => {
-                    return self.call(frames, stack, callee.as_closure(), arg_count);
+                    return self.call_closure(frames, stack, callee.as_closure(), arg_count);
+                }
+                ObjType::Function => {
+                    return self.call_function(frames, stack, callee.as_function(), arg_count);
                 }
                 ObjType::Native => {
                     let native = unsafe { &*(callee.as_obj() as *mut ObjNative) };
@@ -309,35 +335,46 @@ impl Vm {
     }
 
     fn run(&mut self, frames: &mut Frames, stack: &mut ValueStack) -> InterpretResult {
-        let mut frame = &mut frames[self.frame_count - 1];
+        let mut frame_index = self.frame_count - 1;
 
         loop {
             if cfg!(debug_assertions) {
                 stack.debug_content();
                 unsafe {
-                    let chunk = &*(*(*frame.closure).function).chunk();
-                    let offset = frame.ip.offset_from(chunk.get_code_ptr()) as usize;
-                    chunk.disassemble_unstruction(offset);
+                    let frame = &mut frames[frame_index];
+
+                    let function_ptr = frame.function();
+                    if !function_ptr.is_null() {
+                        let chunk = &*(*function_ptr).chunk();
+                        let offset = frame.ip.offset_from(chunk.get_code_ptr()) as usize;
+                        chunk.disassemble_unstruction(offset);
+                    }
                 }
             }
 
-            let Some(op) = OpCode::from_byte(Self::read_byte(frame)) else {
+            let Some(op) = OpCode::from_byte(Self::read_byte(&mut frames[frame_index])) else {
                 panic!("Invalid op code");
             };
 
             match op {
                 OpCode::OP_JUMP_IF_FALSE => {
+                    let frame = &mut frames[frame_index];
+
                     let offset = Self::read_u16(frame);
                     if stack.peek(0).is_falsey() {
                         frame.ip = unsafe { frame.ip.add(offset as usize) };
                     }
                 }
                 OpCode::OP_JUMP => {
+                    let frame = &mut frames[frame_index];
+
                     let offset = Self::read_u16(frame);
                     frame.ip = unsafe { frame.ip.add(offset as usize) };
                 }
 
                 OpCode::OP_LOOP => {
+                    let frame = &mut frames[frame_index];
+
                     let offset = Self::read_u16(frame);
                     frame.ip = unsafe { frame.ip.sub(offset as usize) };
                 }
@@ -347,17 +384,23 @@ impl Vm {
                 }
 
                 OpCode::OP_GET_UPVALUE => {
+                    let frame = &mut frames[frame_index];
+
                     let slot = Self::read_byte(frame) as usize;
                     unsafe {
-                        let value = (**(*frame.closure).upvalues.add(slot)).location;
+                        let closure = frame.closure();
+                        let value = (**(*closure).upvalues.add(slot)).location;
                         stack.push(*value);
                     }
                 }
 
                 OpCode::OP_SET_UPVALUE => {
+                    let frame = &mut frames[frame_index];
+
                     let slot = Self::read_byte(frame) as usize;
                     unsafe {
-                        let upvalue = *(*frame.closure).upvalues.add(slot);
+                        let closure = frame.closure();
+                        let upvalue = *(*closure).upvalues.add(slot);
                         *(*upvalue).location = *stack.peek(0);
                     }
                 }
@@ -368,6 +411,8 @@ impl Vm {
                 }
 
                 OpCode::OP_GET_LOCAL => {
+                    let frame = &mut frames[frame_index];
+
                     let slot = Self::read_byte(frame) as usize;
                     unsafe {
                         let value = *frame.slots.add(slot);
@@ -376,6 +421,8 @@ impl Vm {
                 }
 
                 OpCode::OP_SET_LOCAL => {
+                    let frame = &mut frames[frame_index];
+
                     let slot = Self::read_byte(frame) as usize;
                     let value = *stack.peek(0);
                     unsafe {
@@ -384,6 +431,8 @@ impl Vm {
                 }
 
                 OpCode::OP_SET_GLOBAL => {
+                    let frame = &mut frames[frame_index];
+
                     let Some(name_str) = self.read_string(frame) else {
                         self.runtime_error(frames, stack, "Global variable name must be a string.");
                         return InterpretResult::RuntimeError;
@@ -394,6 +443,8 @@ impl Vm {
                 }
 
                 OpCode::OP_GET_GLOBAL => {
+                    let frame = &mut frames[frame_index];
+
                     let Some(name_str) = self.read_string(frame) else {
                         self.runtime_error(frames, stack, "Global variable name must be a string.");
                         return InterpretResult::RuntimeError;
@@ -409,6 +460,8 @@ impl Vm {
                 }
 
                 OpCode::OP_DEFINE_GLOBAL => {
+                    let frame = &mut frames[frame_index];
+
                     let Some(name_str) = self.read_string(frame) else {
                         self.runtime_error(frames, stack, "Global variable name must be a string.");
                         return InterpretResult::RuntimeError;
@@ -428,6 +481,8 @@ impl Vm {
                 }
 
                 OpCode::OP_RETURN => {
+                    let frame = &mut frames[frame_index];
+
                     let result = stack.pop();
 
                     self.close_upvalues(frame.slots);
@@ -440,24 +495,34 @@ impl Vm {
 
                     stack.set_top(frame.slots as *mut Value);
                     stack.push(result);
-                    frame = &mut frames[self.frame_count - 1];
+
+                    frame_index = self.frame_count - 1;
                 }
 
                 OpCode::OP_CLOSURE => {
-                    let function = Self::read_constant(frame).as_function();
+                    let function = Self::read_constant(&mut frames[frame_index]).as_function();
                     let closure = ObjClosure::new(self, function);
                     stack.push(Value::Obj(closure as *mut Obj));
 
                     unsafe {
                         for i in 0..(*closure).upvalue_count {
-                            let is_local = Self::read_byte(frame);
-                            let index = Self::read_byte(frame);
+                            let (is_local, index) = {
+                                let frame = &mut frames[frame_index];
+
+                                let is_local = Self::read_byte(frame);
+                                let index = Self::read_byte(frame);
+
+                                (is_local, index)
+                            };
 
                             if is_local == 1 {
+                                let frame = &mut frames[frame_index];
+
                                 let upvalue = self.capture_upvalue(frame.slots.add(index as usize));
                                 *(*closure).upvalues.add(i) = upvalue;
                             } else {
-                                let upvalue = *(*frame.closure).upvalues.add(index as usize);
+                                let enclosing_frame = &frames[self.frame_count - 2];
+                                let upvalue = enclosing_frame.enclosing_upvalue(index as usize);
                                 *(*closure).upvalues.add(i) = upvalue;
                             }
                         }
@@ -465,11 +530,15 @@ impl Vm {
                 }
 
                 OpCode::OP_CONSTANT => {
+                    let frame = &mut frames[frame_index];
+
                     let constant = Self::read_constant(frame);
                     stack.push(constant);
                 }
 
                 OpCode::OP_CONSTANT_LONG => {
+                    let frame = &mut frames[frame_index];
+
                     let constant = Self::read_constant_long(frame);
                     stack.push(constant);
                 }
@@ -588,6 +657,8 @@ impl Vm {
                     }
                 }
                 OpCode::OP_CALL => {
+                    let frame = &mut frames[frame_index];
+
                     let arg_count = Self::read_byte(frame) as usize;
                     let callee = *stack.peek(arg_count);
 
@@ -595,7 +666,7 @@ impl Vm {
                         return InterpretResult::RuntimeError;
                     }
 
-                    frame = &mut frames[self.frame_count - 1];
+                    frame_index = self.frame_count - 1;
                 }
             }
         }
@@ -610,13 +681,11 @@ impl Vm {
         };
 
         let mut frames = std::array::from_fn(|_| CallFrame::null());
+        self.frame_count = 0;
 
         stack.push(Value::Obj(function as *mut Obj));
-        let closure = ObjClosure::new(self, function);
-        stack.pop();
-        stack.push(Value::Obj(closure as *mut Obj));
 
-        self.call(&mut frames, stack, closure, 0);
+        self.call_function(&mut frames, stack, function, 0);
 
         self.run(&mut frames, stack)
     }

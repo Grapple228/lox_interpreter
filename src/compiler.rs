@@ -1,6 +1,6 @@
 use crate::{
     common::{Chunk, DynamicArray, OpCode, Stack, Value},
-    object::{FunctionType, Obj, ObjClosure},
+    object::{FunctionType, Obj, ObjClosure, ObjUpValue},
     parser::get_parser,
     precedence::Precedence,
     scanner::{init_scanner, scan_token, scanner_line},
@@ -271,8 +271,13 @@ struct LoopScope {
     has_increment: bool,
 }
 
+pub enum Callee {
+    Closure(*mut ObjClosure),
+    Function(*mut ObjFunction),
+}
+
 pub struct CallFrame {
-    pub closure: *mut ObjClosure,
+    pub callee: Callee,
     pub ip: *mut u8,
     pub slots: *mut Value,
 }
@@ -280,9 +285,37 @@ pub struct CallFrame {
 impl CallFrame {
     pub fn null() -> Self {
         Self {
-            closure: std::ptr::null_mut(),
+            callee: Callee::Function(std::ptr::null_mut()),
+
             ip: std::ptr::null_mut(),
             slots: std::ptr::null_mut(),
+        }
+    }
+
+    pub fn function(&self) -> *mut ObjFunction {
+        match self.callee {
+            Callee::Closure(ptr) => unsafe { (*ptr).function },
+            Callee::Function(ptr) => ptr,
+        }
+    }
+
+    pub fn is_closure(&self) -> bool {
+        matches!(self.callee, Callee::Closure(_))
+    }
+
+    pub fn closure(&self) -> *mut ObjClosure {
+        match self.callee {
+            Callee::Closure(ptr) => ptr,
+            _ => std::ptr::null_mut(),
+        }
+    }
+
+    pub fn enclosing_upvalue(&self, index: usize) -> *mut ObjUpValue {
+        match self.callee {
+            Callee::Closure(ptr) => unsafe { *(*ptr).upvalues.add(index) },
+            Callee::Function(_) => {
+                panic!("Cannot capture upvalue from a plain function frame");
+            }
         }
     }
 }
@@ -797,11 +830,17 @@ impl Compiler {
         let constant = self
             .current_chunk()
             .add_constant(Value::Obj(function as *mut Obj));
-        self.emit_bytes(OpCode::OP_CLOSURE as u8, constant as u8);
         let upvalue_count = unsafe { (*function).upvalue_count };
-        for i in 0..upvalue_count {
-            self.emit_byte(if compiler.upvalues[i].is_local { 1 } else { 0 });
-            self.emit_byte(compiler.upvalues[i].index as u8);
+
+        // Определяем closure или обычная функция
+        if upvalue_count > 0 {
+            self.emit_bytes(OpCode::OP_CLOSURE as u8, constant as u8);
+            for i in 0..upvalue_count {
+                self.emit_byte(if compiler.upvalues[i].is_local { 1 } else { 0 });
+                self.emit_byte(compiler.upvalues[i].index as u8);
+            }
+        } else {
+            self.emit_bytes(OpCode::OP_CONSTANT as u8, constant as u8);
         }
     }
 
