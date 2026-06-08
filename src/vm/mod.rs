@@ -3,10 +3,10 @@
 use tracing::warn;
 
 use crate::{
-    common::{OpCode, Stack, Value},
+    common::{OpCode, Stack, Table, Value},
     compiler::{CallFrame, Callee, Compiler},
     object::{FunctionType, NativeFn, NativeResult, ObjClosure, ObjNative, ObjUpValue},
-    table::Table,
+    token::TokenType::PERCENT,
     Obj, ObjFunction, ObjString, ObjType,
 };
 
@@ -36,44 +36,105 @@ impl InterpretResult {
 
 pub struct Vm {
     pub objects: *mut Obj,
-    pub bytes_allocated: usize,
 
     pub strings: Table,
     pub globals: Table,
 
-    open_upvalues: *mut ObjUpValue,
-
     frame_count: usize,
+
+    pub open_upvalues: *mut ObjUpValue,
+    pub stack: ValueStack,
+    pub frames: Frames,
+    pub current: *mut Compiler,
+
+    pub gray_count: usize,
+    pub gray_capacity: usize,
+    pub gray_stack: *mut *mut Obj,
+
+    pub bytes_allocated: usize,
+    pub next_gc: usize,
+
+    pub is_compiling: bool,
 }
 
 impl Vm {
+    pub fn frame_count(&self) -> usize {
+        self.frame_count
+    }
+
     pub fn new() -> Self {
         Self {
             objects: std::ptr::null_mut(),
             frame_count: 0,
-            bytes_allocated: 0,
             strings: Table::new(),
             globals: Table::new(),
 
             open_upvalues: std::ptr::null_mut(),
+
+            stack: ValueStack::new(),
+            frames: std::array::from_fn(|_| CallFrame::null()),
+            current: std::ptr::null_mut(),
+
+            gray_count: 0,
+            gray_capacity: 0,
+            gray_stack: std::ptr::null_mut(),
+
+            bytes_allocated: 0,
+            next_gc: 1024 * 1024,
+
+            is_compiling: false,
         }
     }
 
-    pub fn init(&mut self, stack: &mut ValueStack) {
-        self.init_natives(stack);
+    pub fn init(&mut self) {
+        self.init_natives();
     }
 
-    fn init_natives(&mut self, stack: &mut ValueStack) {
-        self.define_native(stack, "clock", 0, natives::clock);
-        self.define_native(stack, "random", 2, natives::random);
-        self.define_native(stack, "square", 1, natives::square);
+    pub fn reset(&mut self) {
+        // Очищаем все объекты
+        self.free_objects();
+
+        // Сбрасываем структуры
+        self.strings = Table::new();
+        self.globals = Table::new();
+        self.frame_count = 0;
+        self.open_upvalues = std::ptr::null_mut();
+        self.stack.reset();
+        self.frames = std::array::from_fn(|_| CallFrame::null());
+
+        // Сбрасываем GC
+        if self.gray_capacity > 0 && !self.gray_stack.is_null() {
+            self.reallocate(
+                self.gray_stack as *mut u8,
+                self.gray_capacity * size_of::<*mut Obj>(),
+                0,
+            );
+        }
+        self.gray_stack = std::ptr::null_mut();
+        self.gray_capacity = 0;
+        self.gray_count = 0;
+
+        // Сбрасываем счетчики памяти
+        self.bytes_allocated = 0;
+        self.next_gc = 1024 * 1024;
+        self.is_compiling = false;
+        self.current = std::ptr::null_mut();
+
+        // Инициализируем natives заново
+        self.init_natives();
     }
 
-    fn runtime_error(&self, frames: &Frames, stack: &mut ValueStack, message: &str) {
+    fn init_natives(&mut self) {
+        self.define_native("clock", 0, natives::clock);
+        self.define_native("random", 2, natives::random);
+        self.define_native("square", 1, natives::square);
+    }
+
+    fn runtime_error(&mut self, message: &str) {
         eprintln!("{}", message);
 
         for i in (0..self.frame_count).rev() {
-            let frame = &frames[i];
+            let frame = &self.frames[i];
             unsafe {
                 let function_ptr = frame.function();
                 if function_ptr.is_null() {
@@ -97,7 +158,7 @@ impl Vm {
             }
         }
 
-        stack.reset();
+        self.stack.reset();
     }
 
     fn read_byte(frame: &mut CallFrame) -> u8 {
@@ -164,104 +225,81 @@ impl Vm {
         }
     }
 
-    fn call_function(
-        &mut self,
-        frames: &mut Frames,
-        stack: &mut ValueStack,
-        function: *mut ObjFunction,
-        arg_count: usize,
-    ) -> bool {
+    fn call_function(&mut self, function: *mut ObjFunction, arg_count: usize) -> bool {
         unsafe {
             if self.frame_count == FRAMES_MAX {
-                self.runtime_error(frames, stack, "Stack overflow.");
+                self.runtime_error("Stack overflow.");
                 return false;
             }
 
             let arity = (*function).arity();
             if arg_count != arity {
-                self.runtime_error(
-                    frames,
-                    stack,
-                    &format!("Expected {} arguments but got {}.", arity, arg_count),
-                );
+                self.runtime_error(&format!(
+                    "Expected {} arguments but got {}.",
+                    arity, arg_count
+                ));
                 return false;
             }
 
-            let frame = &mut frames[self.frame_count];
+            let frame = &mut self.frames[self.frame_count];
             self.frame_count += 1;
 
             frame.callee = Callee::Function(function);
             frame.ip = (*(*function).chunk()).get_code_mut_ptr();
 
-            let stack_top = stack.len();
-            frame.slots = stack.get_ptr(stack_top - arg_count - 1) as *mut Value;
+            let stack_top = self.stack.len();
+            frame.slots = self.stack.get_ptr(stack_top - arg_count - 1) as *mut Value;
 
             true
         }
     }
 
-    fn call_closure(
-        &mut self,
-        frames: &mut Frames,
-        stack: &mut ValueStack,
-        closure: *mut ObjClosure,
-        arg_count: usize,
-    ) -> bool {
-        if !self.call_function(frames, stack, unsafe { (*closure).function }, arg_count) {
+    fn call_closure(&mut self, closure: *mut ObjClosure, arg_count: usize) -> bool {
+        if !self.call_function(unsafe { (*closure).function }, arg_count) {
             return false;
         }
-        let frame = &mut frames[self.frame_count - 1];
+        let frame = &mut self.frames[self.frame_count - 1];
         frame.callee = Callee::Closure(closure);
         true
     }
 
-    fn call_value(
-        &mut self,
-        frames: &mut Frames,
-        stack: &mut ValueStack,
-        callee: Value,
-        arg_count: usize,
-    ) -> bool {
+    fn call_value(&mut self, callee: Value, arg_count: usize) -> bool {
         if callee.is_obj() {
             match unsafe { (*callee.as_obj()).typ() } {
                 ObjType::Closure => {
-                    return self.call_closure(frames, stack, callee.as_closure(), arg_count);
+                    return self.call_closure(callee.as_closure(), arg_count);
                 }
                 ObjType::Function => {
-                    return self.call_function(frames, stack, callee.as_function(), arg_count);
+                    return self.call_function(callee.as_function(), arg_count);
                 }
                 ObjType::Native => {
                     let native = unsafe { &*(callee.as_obj() as *mut ObjNative) };
 
                     if arg_count != native.arity() {
-                        self.runtime_error(
-                            frames,
-                            stack,
-                            &format!(
-                                "Expected {} arguments but got {}.",
-                                native.arity(),
-                                arg_count
-                            ),
-                        );
+                        self.runtime_error(&format!(
+                            "Expected {} arguments but got {}.",
+                            native.arity(),
+                            arg_count
+                        ));
                         return false;
                     }
 
-                    let result = native.function()(
-                        arg_count,
-                        stack.get_ptr(stack.len() - arg_count) as *mut Value,
-                    );
+                    let len = self.stack.len() - arg_count;
+
+                    let result =
+                        native.function()(arg_count, self.stack.get_ptr(len) as *mut Value);
 
                     // Убираем аргументы и функцию со стека
                     for _ in 0..arg_count + 1 {
-                        stack.pop();
+                        self.stack.pop();
                     }
 
                     match result {
                         NativeResult::Success(value) => {
-                            stack.push(value);
+                            self.stack.push(value);
                         }
                         NativeResult::Error(e) => {
-                            self.runtime_error(frames, stack, &e);
+                            self.runtime_error(&e);
                             return false;
                         }
                     }
@@ -272,29 +310,23 @@ impl Vm {
             }
         }
 
-        self.runtime_error(frames, stack, "Can only call functions as classes.");
+        self.runtime_error("Can only call functions as classes.");
         false
     }
 
-    fn define_native(
-        &mut self,
-        stack: &mut ValueStack,
-        name: &'static str,
-        arity: usize,
-        function: NativeFn,
-    ) {
+    fn define_native(&mut self, name: &'static str, arity: usize, function: NativeFn) {
         let name_obj = ObjString::copy(self, name.as_ptr(), name.len());
-        stack.push(Value::Obj(name_obj as *mut Obj));
+        self.stack.push(Value::Obj(name_obj as *mut Obj));
 
         let native = ObjNative::allocate(self, arity, function);
-        stack.push(Value::Obj(native as *mut Obj));
+        self.stack.push(Value::Obj(native as *mut Obj));
 
-        let key = stack.get(0).as_string();
-        let value = *stack.get(1);
+        let key = self.stack.get(0).as_string();
+        let value = *self.stack.get(1);
         self.globals.set(key, value);
 
-        stack.pop();
-        stack.pop();
+        self.stack.pop();
+        self.stack.pop();
     }
 
     fn capture_upvalue(&mut self, local: *mut Value) -> *mut ObjUpValue {
@@ -336,14 +368,14 @@ impl Vm {
         }
     }
 
-    fn run(&mut self, frames: &mut Frames, stack: &mut ValueStack) -> InterpretResult {
-        let mut frame_index = self.frame_count - 1;
+    fn run(&mut self) -> InterpretResult {
+        let mut frame_ptr = unsafe { self.frames.as_mut_ptr().add(self.frame_count - 1) };
 
         loop {
             if cfg!(debug_assertions) {
-                stack.debug_content();
+                self.stack.debug_content();
                 unsafe {
-                    let frame = &mut frames[frame_index];
+                    let frame = unsafe { &mut *frame_ptr };
 
                     let function_ptr = frame.function();
                     if !function_ptr.is_null() {
@@ -354,138 +386,133 @@ impl Vm {
                 }
             }
 
-            let Some(op) = OpCode::from_byte(Self::read_byte(&mut frames[frame_index])) else {
+            let Some(op) = OpCode::from_byte(Self::read_byte(unsafe { &mut *frame_ptr })) else {
                 panic!("Invalid op code");
             };
 
             match op {
                 OpCode::OP_JUMP_IF_FALSE => {
-                    let frame = &mut frames[frame_index];
+                    let frame = unsafe { &mut *frame_ptr };
 
                     let offset = Self::read_u16(frame);
-                    if stack.peek(0).is_falsey() {
+                    if self.stack.peek(0).is_falsey() {
                         frame.ip = unsafe { frame.ip.add(offset as usize) };
                     }
                 }
                 OpCode::OP_JUMP => {
-                    let frame = &mut frames[frame_index];
+                    let frame = unsafe { &mut *frame_ptr };
 
                     let offset = Self::read_u16(frame);
                     frame.ip = unsafe { frame.ip.add(offset as usize) };
                 }
 
                 OpCode::OP_LOOP => {
-                    let frame = &mut frames[frame_index];
+                    let frame = unsafe { &mut *frame_ptr };
 
                     let offset = Self::read_u16(frame);
                     frame.ip = unsafe { frame.ip.sub(offset as usize) };
                 }
 
                 OpCode::OP_POP => {
-                    _ = stack.pop();
+                    _ = self.stack.pop();
                 }
 
                 OpCode::OP_GET_UPVALUE => {
-                    let frame = &mut frames[frame_index];
+                    let frame = unsafe { &mut *frame_ptr };
 
                     let slot = Self::read_byte(frame) as usize;
                     unsafe {
                         let closure = frame.closure();
                         let value = (**(*closure).upvalues.add(slot)).location;
-                        stack.push(*value);
+                        self.stack.push(*value);
                     }
                 }
 
                 OpCode::OP_SET_UPVALUE => {
-                    let frame = &mut frames[frame_index];
+                    let frame = unsafe { &mut *frame_ptr };
 
                     let slot = Self::read_byte(frame) as usize;
                     unsafe {
                         let closure = frame.closure();
                         let upvalue = *(*closure).upvalues.add(slot);
-                        *(*upvalue).location = *stack.peek(0);
+                        *(*upvalue).location = *self.stack.peek(0);
                     }
                 }
 
                 OpCode::OP_CLOSE_UPVALUE => {
-                    self.close_upvalues(stack.get_ptr(stack.len() - 1) as *mut Value);
-                    stack.pop();
+                    let len = self.stack.len() - 1;
+                    self.close_upvalues(self.stack.get_ptr(len) as *mut Value);
+                    self.stack.pop();
                 }
 
                 OpCode::OP_GET_LOCAL => {
-                    let frame = &mut frames[frame_index];
+                    let frame = unsafe { &mut *frame_ptr };
 
                     let slot = Self::read_byte(frame) as usize;
                     unsafe {
                         let value = *frame.slots.add(slot);
-                        stack.push(value);
+                        self.stack.push(value);
                     }
                 }
 
                 OpCode::OP_SET_LOCAL => {
-                    let frame = &mut frames[frame_index];
+                    let frame = unsafe { &mut *frame_ptr };
 
                     let slot = Self::read_byte(frame) as usize;
-                    let value = *stack.peek(0);
+                    let value = *self.stack.peek(0);
                     unsafe {
                         *frame.slots.add(slot) = value;
                     }
                 }
 
                 OpCode::OP_SET_GLOBAL => {
-                    let frame = &mut frames[frame_index];
-
-                    let Some(name_str) = self.read_string(frame) else {
-                        self.runtime_error(frames, stack, "Global variable name must be a string.");
+                    let Some(name_str) = self.read_string(unsafe { &mut *frame_ptr }) else {
+                        self.runtime_error("Global variable name must be a string.");
                         return InterpretResult::RuntimeError;
                     };
 
-                    let value = *stack.peek(0);
+                    let value = *self.stack.peek(0);
                     self.globals.set(name_str, value);
                 }
 
                 OpCode::OP_GET_GLOBAL => {
-                    let frame = &mut frames[frame_index];
-
-                    let Some(name_str) = self.read_string(frame) else {
-                        self.runtime_error(frames, stack, "Global variable name must be a string.");
+                    let Some(name_str) = self.read_string(unsafe { &mut *frame_ptr }) else {
+                        self.runtime_error("Global variable name must be a string.");
                         return InterpretResult::RuntimeError;
                     };
 
                     let mut value = Value::Nil;
                     if !self.globals.get(name_str, &mut value) {
-                        self.runtime_error(frames, stack, "Undefined variable.");
+                        self.runtime_error("Undefined variable.");
                         return InterpretResult::RuntimeError;
                     }
 
-                    stack.push(value);
+                    self.stack.push(value);
                 }
 
                 OpCode::OP_DEFINE_GLOBAL => {
-                    let frame = &mut frames[frame_index];
-
-                    let Some(name_str) = self.read_string(frame) else {
-                        self.runtime_error(frames, stack, "Global variable name must be a string.");
+                    let Some(name_str) = self.read_string(unsafe { &mut *frame_ptr }) else {
+                        self.runtime_error("Global variable name must be a string.");
                         return InterpretResult::RuntimeError;
                     };
 
-                    let value = *stack.peek(0);
+                    let value = *self.stack.peek(0);
                     self.globals.set(name_str, value);
-                    stack.pop();
+                    self.stack.pop();
                 }
 
-                OpCode::OP_NIL => stack.push(Value::Nil),
-                OpCode::OP_TRUE => stack.push(Value::Bool(true)),
-                OpCode::OP_FALSE => stack.push(Value::Bool(false)),
+                OpCode::OP_NIL => self.stack.push(Value::Nil),
+                OpCode::OP_TRUE => self.stack.push(Value::Bool(true)),
+                OpCode::OP_FALSE => self.stack.push(Value::Bool(false)),
 
                 OpCode::OP_PRINT => {
-                    println!("{}", stack.pop());
+                    println!("{}", self.stack.pop());
                 }
 
                 OpCode::OP_RETURN => {
-                    let frame = &mut frames[frame_index];
+                    let frame = unsafe { &mut *frame_ptr };
 
-                    let result = stack.pop();
+                    let result = self.stack.pop();
 
                     self.close_upvalues(frame.slots);
 
@@ -495,21 +522,23 @@ impl Vm {
                         return InterpretResult::Ok;
                     }
 
-                    stack.set_top(frame.slots as *mut Value);
-                    stack.push(result);
+                    self.stack.set_top(frame.slots as *mut Value);
+                    self.stack.push(result);
 
-                    frame_index = self.frame_count - 1;
+                    unsafe {
+                        frame_ptr = unsafe { self.frames.as_mut_ptr().add(self.frame_count - 1) };
+                    }
                 }
 
                 OpCode::OP_CLOSURE => {
-                    let function = Self::read_constant(&mut frames[frame_index]).as_function();
+                    let function = Self::read_constant(unsafe { &mut *frame_ptr }).as_function();
                     let closure = ObjClosure::allocate(self, function);
-                    stack.push(Value::Obj(closure as *mut Obj));
+                    self.stack.push(Value::Obj(closure as *mut Obj));
 
                     unsafe {
                         for i in 0..(*closure).upvalue_count {
                             let (is_local, index) = {
-                                let frame = &mut frames[frame_index];
+                                let frame = unsafe { &mut *frame_ptr };
 
                                 let is_local = Self::read_byte(frame);
                                 let index = Self::read_byte(frame);
@@ -518,13 +547,13 @@ impl Vm {
                             };
 
                             if is_local == 1 {
-                                let frame = &mut frames[frame_index];
-
-                                let upvalue = self.capture_upvalue(frame.slots.add(index as usize));
+                                let upvalue = self.capture_upvalue(
+                                    unsafe { &mut *frame_ptr }.slots.add(index as usize),
+                                );
                                 *(*closure).upvalues.add(i) = upvalue;
                             } else {
-                                let enclosing_frame = &frames[self.frame_count - 2];
-                                let upvalue = enclosing_frame.enclosing_upvalue(index as usize);
+                                let enclosing = &self.frames[self.frame_count - 2];
+                                let upvalue = enclosing.enclosing_upvalue(index as usize);
                                 *(*closure).upvalues.add(i) = upvalue;
                             }
                         }
@@ -532,165 +561,178 @@ impl Vm {
                 }
 
                 OpCode::OP_CONSTANT => {
-                    let frame = &mut frames[frame_index];
-
-                    let constant = Self::read_constant(frame);
-                    stack.push(constant);
+                    let constant = Self::read_constant(unsafe { &mut *frame_ptr });
+                    self.stack.push(constant);
                 }
 
                 OpCode::OP_CONSTANT_LONG => {
-                    let frame = &mut frames[frame_index];
-
-                    let constant = Self::read_constant_long(frame);
-                    stack.push(constant);
+                    let constant = Self::read_constant_long(unsafe { &mut *frame_ptr });
+                    self.stack.push(constant);
                 }
 
                 OpCode::OP_NOT => {
-                    let value = stack.pop();
-                    stack.push(Value::Bool(value.is_falsey()));
+                    let value = self.stack.pop();
+                    self.stack.push(Value::Bool(value.is_falsey()));
                 }
                 OpCode::OP_NEGATE => {
-                    let value = stack.pop();
+                    let value = self.stack.pop();
                     match value {
-                        Value::Number(n) => stack.push(Value::Number(-n)),
+                        Value::Number(n) => self.stack.push(Value::Number(-n)),
                         _ => {
-                            self.runtime_error(frames, stack, "Operand must be a number.");
+                            self.runtime_error("Operand must be a number.");
                             return InterpretResult::RuntimeError;
                         }
                     }
                 }
 
                 OpCode::OP_ADD => {
-                    let right = stack.pop();
-                    let left = stack.pop();
+                    let right = *self.stack.peek(0);
+                    let left = *self.stack.peek(1);
 
                     match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => stack.push(Value::Number(a + b)),
-                        (Value::Obj(a), Value::Obj(b)) => match self.add_strings(a, b) {
-                            Some(v) => stack.push(v),
-                            None => {
-                                self.runtime_error(
-                                    frames,
-                                    stack,
-                                    "Operands must be numbers or strings.",
-                                );
-                                return InterpretResult::RuntimeError;
-                            }
-                        },
+                        (Value::Number(a), Value::Number(b)) => {
+                            self.stack.pop();
+                            self.stack.pop();
+
+                            self.stack.push(Value::Number(a + b))
+                        }
                         _ => {
-                            self.runtime_error(
-                                frames,
-                                stack,
-                                "Operands must be numbers or strings.",
-                            );
-                            return InterpretResult::RuntimeError;
+                            let left_str = left.allocate_string(self);
+                            let right_str = right.allocate_string(self);
+
+                            match self.add_strings(left_str as *mut Obj, right_str as *mut Obj) {
+                                Some(v) => {
+                                    self.stack.pop();
+                                    self.stack.pop();
+                                    self.stack.push(v);
+                                }
+                                None => {
+                                    self.runtime_error("Failed to concatenate.");
+                                    return InterpretResult::RuntimeError;
+                                }
+                            }
+                            // self.runtime_error("Operands must be numbers or strings.");
+                            // return InterpretResult::RuntimeError;
                         }
                     }
                 }
                 OpCode::OP_SUBSTRACT => {
-                    let right = stack.pop();
-                    let left = stack.pop();
+                    let right = self.stack.pop();
+                    let left = self.stack.pop();
                     match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => stack.push(Value::Number(a - b)),
+                        (Value::Number(a), Value::Number(b)) => {
+                            self.stack.push(Value::Number(a - b))
+                        }
                         _ => {
-                            self.runtime_error(frames, stack, "Operands must be numbers.");
+                            self.runtime_error("Operands must be numbers.");
                             return InterpretResult::RuntimeError;
                         }
                     }
                 }
                 OpCode::OP_MOD => {
-                    let right = stack.pop();
-                    let left = stack.pop();
+                    let right = self.stack.pop();
+                    let left = self.stack.pop();
                     match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => stack.push(Value::Number(a % b)),
+                        (Value::Number(a), Value::Number(b)) => {
+                            self.stack.push(Value::Number(a % b))
+                        }
                         _ => {
-                            self.runtime_error(frames, stack, "Operands must be numbers.");
+                            self.runtime_error("Operands must be numbers.");
                             return InterpretResult::RuntimeError;
                         }
                     }
                 }
                 OpCode::OP_MULTIPLY => {
-                    let right = stack.pop();
-                    let left = stack.pop();
+                    let right = self.stack.pop();
+                    let left = self.stack.pop();
                     match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => stack.push(Value::Number(a * b)),
+                        (Value::Number(a), Value::Number(b)) => {
+                            self.stack.push(Value::Number(a * b))
+                        }
                         _ => {
-                            self.runtime_error(frames, stack, "Operands must be numbers.");
+                            self.runtime_error("Operands must be numbers.");
                             return InterpretResult::RuntimeError;
                         }
                     }
                 }
                 OpCode::OP_DIVIDE => {
-                    let right = stack.pop();
-                    let left = stack.pop();
+                    let right = self.stack.pop();
+                    let left = self.stack.pop();
                     match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => stack.push(Value::Number(a / b)),
+                        (Value::Number(a), Value::Number(b)) => {
+                            self.stack.push(Value::Number(a / b))
+                        }
                         _ => {
-                            self.runtime_error(frames, stack, "Operands must be numbers.");
+                            self.runtime_error("Operands must be numbers.");
                             return InterpretResult::RuntimeError;
                         }
                     }
                 }
                 OpCode::OP_EQUAL => {
-                    let right = stack.pop();
-                    let left = stack.pop();
-                    stack.push(Value::Bool(left == right));
+                    let right = self.stack.pop();
+                    let left = self.stack.pop();
+                    self.stack.push(Value::Bool(left == right));
                 }
                 OpCode::OP_GREATER => {
-                    let right = stack.pop();
-                    let left = stack.pop();
+                    let right = self.stack.pop();
+                    let left = self.stack.pop();
                     match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => stack.push(Value::Bool(a > b)),
+                        (Value::Number(a), Value::Number(b)) => self.stack.push(Value::Bool(a > b)),
                         _ => {
-                            self.runtime_error(frames, stack, "Operands must be numbers.");
+                            self.runtime_error("Operands must be numbers.");
                             return InterpretResult::RuntimeError;
                         }
                     }
                 }
                 OpCode::OP_LESS => {
-                    let right = stack.pop();
-                    let left = stack.pop();
+                    let right = self.stack.pop();
+                    let left = self.stack.pop();
                     match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => stack.push(Value::Bool(a < b)),
+                        (Value::Number(a), Value::Number(b)) => self.stack.push(Value::Bool(a < b)),
                         _ => {
-                            self.runtime_error(frames, stack, "Operands must be numbers.");
+                            self.runtime_error("Operands must be numbers.");
                             return InterpretResult::RuntimeError;
                         }
                     }
                 }
                 OpCode::OP_CALL => {
-                    let frame = &mut frames[frame_index];
+                    let arg_count = Self::read_byte(unsafe { &mut *frame_ptr }) as usize;
+                    let callee = *self.stack.peek(arg_count);
 
-                    let arg_count = Self::read_byte(frame) as usize;
-                    let callee = *stack.peek(arg_count);
-
-                    if !self.call_value(frames, stack, callee, arg_count) {
+                    if !self.call_value(callee, arg_count) {
                         return InterpretResult::RuntimeError;
                     }
 
-                    frame_index = self.frame_count - 1;
+                    frame_ptr = unsafe { self.frames.as_mut_ptr().add(self.frame_count - 1) };
                 }
             }
         }
     }
 
-    pub fn interpret(&mut self, stack: &mut ValueStack, source: *const u8) -> InterpretResult {
+    pub fn interpret(&mut self, source: *const u8) -> InterpretResult {
+        self.is_compiling = true;
+
         let mut compiler =
             Compiler::new(self as *mut Vm, FunctionType::Script, std::ptr::null_mut());
 
+        self.current = &mut *compiler;
+
         let function = compiler.compile(source);
+
+        self.is_compiling = false;
+
         if function.is_null() {
             return InterpretResult::CompileError;
         };
 
-        let mut frames = std::array::from_fn(|_| CallFrame::null());
         self.frame_count = 0;
+        self.frames = std::array::from_fn(|_| CallFrame::null());
 
-        stack.push(Value::Obj(function as *mut Obj));
+        self.stack.push(Value::Obj(function as *mut Obj));
 
-        self.call_function(&mut frames, stack, function, 0);
+        self.call_function(function, 0);
 
-        self.run(&mut frames, stack)
+        self.run()
     }
 }
 

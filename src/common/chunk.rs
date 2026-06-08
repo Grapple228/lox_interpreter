@@ -7,13 +7,14 @@ use crate::{
         OpCode::{self},
         Value,
     },
-    vm::Vm,
+    vm::{ValueStack, Vm},
 };
 
 pub struct Chunk {
     pub code: DynamicArray<u8>,
     pub constants: DynamicArray<Value>,
     lines: DynamicArray<LineRun>,
+    stack: *mut ValueStack,
 }
 
 impl Chunk {
@@ -36,6 +37,7 @@ impl Chunk {
             code: DynamicArray::new(vm),
             constants: DynamicArray::new(vm),
             lines: DynamicArray::new(vm),
+            stack: &mut vm.stack,
         };
 
         res
@@ -51,6 +53,7 @@ impl Chunk {
             code: DynamicArray::with_capacity(vm, code_capacity),
             constants: DynamicArray::with_capacity(vm, constants_capacity),
             lines: DynamicArray::with_capacity(vm, lines_capacity),
+            stack: &mut vm.stack,
         }
     }
 
@@ -272,7 +275,14 @@ impl Chunk {
     }
 
     pub fn add_constant(&mut self, value: Value) -> usize {
+        let stack = unsafe { &mut *self.stack };
+
+        stack.push(value);
+
         self.constants.write(value);
+
+        stack.pop();
+
         self.constants.count() - 1
     }
 

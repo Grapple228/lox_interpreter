@@ -1,4 +1,4 @@
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{alloc, dealloc, realloc, Layout};
 
 use tracing::debug;
 
@@ -15,7 +15,7 @@ pub use string::ObjString;
 use tracing_subscriber::layer;
 pub use upvalue::ObjUpValue;
 
-use crate::{common::Value, vm::Vm};
+use crate::{common::Value, gc::Gc, vm::Vm};
 
 #[repr(u8)]
 #[derive(PartialEq, Clone, Copy)]
@@ -42,7 +42,8 @@ impl std::fmt::Display for ObjType {
 #[repr(C)]
 pub struct Obj {
     typ: ObjType,
-    next: *mut Obj,
+    pub is_marked: bool,
+    pub next: *mut Obj,
 }
 
 impl Obj {
@@ -94,36 +95,40 @@ impl Value {
 
 impl Vm {
     pub fn reallocate(&mut self, ptr: *mut u8, old_size: usize, new_size: usize) -> *mut u8 {
+        self.bytes_allocated = self.bytes_allocated + new_size - old_size;
+
+        if new_size > old_size && !self.is_compiling {
+            if cfg!(debug_assertions) {
+                Gc::collect_garbage(self);
+            }
+            if self.bytes_allocated > self.next_gc {
+                Gc::collect_garbage(self);
+            }
+        }
+
         if new_size == 0 {
             if !ptr.is_null() {
                 unsafe {
                     let layout = Layout::from_size_align(old_size, 1).unwrap();
                     dealloc(ptr, layout);
-                    self.bytes_allocated -= old_size;
                 }
             }
-
             return std::ptr::null_mut();
         }
 
-        if ptr.is_null() {
-            let layout = Layout::from_size_align(new_size, 1).unwrap();
-            let new_ptr = unsafe { alloc(layout) };
-            self.bytes_allocated += new_size;
-            return new_ptr;
-        }
-
-        unsafe {
-            let new_layout = Layout::from_size_align(new_size, 1).unwrap();
-            let new_ptr = alloc(new_layout);
-            if !new_ptr.is_null() {
-                std::ptr::copy_nonoverlapping(ptr, new_ptr, old_size.min(new_size));
-                let old_layout = Layout::from_size_align(old_size, 1).unwrap();
-                dealloc(ptr, old_layout);
-                self.bytes_allocated = self.bytes_allocated - old_size + new_size;
+        let new_ptr = if ptr.is_null() {
+            unsafe {
+                let layout = Layout::from_size_align(new_size, 1).unwrap();
+                alloc(layout)
             }
-            new_ptr
-        }
+        } else {
+            unsafe {
+                let new_layout = Layout::from_size_align(new_size, 1).unwrap();
+                realloc(ptr, new_layout, new_size)
+            }
+        };
+
+        new_ptr
     }
 
     fn allocate(&mut self, size: usize) -> *mut u8 {
@@ -139,19 +144,24 @@ impl Vm {
         unsafe {
             let obj = self.allocate(size) as *mut Obj;
             (*obj).typ = typ;
+            (*obj).is_marked = false;
             (*obj).next = self.objects;
             self.objects = obj;
 
             debug!(
-                "allocated object of type {} and size {}, total: {} bytes",
-                typ, size, self.bytes_allocated
+                "{:p} allocate {} for {}, total: {}",
+                obj, size, typ, self.bytes_allocated
             );
 
             obj
         }
     }
 
-    fn deallocate_object(obj: *mut Obj) -> usize {
+    pub fn deallocate_object(obj: *mut Obj) -> usize {
+        unsafe {
+            debug!("{:?} deallocate type {}", obj, (*obj).typ);
+        }
+
         match unsafe { (*obj).typ } {
             ObjType::String => ObjString::deallocate(obj as *mut ObjString),
             ObjType::Function => ObjFunction::deallocate(obj as *mut ObjFunction),
@@ -162,9 +172,6 @@ impl Vm {
     }
 
     pub fn free_objects(&mut self) {
-        self.strings.free();
-        self.globals.free();
-
         let mut obj = self.objects;
 
         while !obj.is_null() {
@@ -172,7 +179,6 @@ impl Vm {
                 let typ = (*obj).typ;
                 let next = (*obj).next;
                 let size = Self::deallocate_object(obj);
-                self.bytes_allocated -= size;
 
                 debug!(
                     "Freeing of {} object with size {}, total: {}",
@@ -182,6 +188,17 @@ impl Vm {
                 obj = next;
             }
         }
+
+        if self.gray_capacity > 0 && !self.gray_stack.is_null() {
+            self.reallocate(
+                self.gray_stack as *mut u8,
+                self.gray_capacity * size_of::<*mut Obj>(),
+                0,
+            );
+        }
+        self.gray_stack = std::ptr::null_mut();
+        self.gray_capacity = 0;
+        self.gray_count = 0;
     }
 }
 

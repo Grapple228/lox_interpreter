@@ -1,4 +1,4 @@
-use crate::object::Obj;
+use crate::{object::Obj, vm::Vm, ObjString, ObjType};
 use std::ops::{Div, Mul, Neg, Not, Rem, Sub};
 
 #[derive(Debug, Clone, Copy)]
@@ -44,6 +44,20 @@ impl Value {
         } else {
             None
         }
+    }
+}
+
+impl Value {
+    pub fn allocate_string(&self, vm: &mut Vm) -> *mut ObjString {
+        if let Value::Obj(obj) = self {
+            unsafe {
+                if (**obj).typ() == ObjType::String {
+                    return *obj as *mut ObjString;
+                }
+            }
+        }
+        let s = format!("{}", self);
+        ObjString::copy(vm, s.as_ptr(), s.len())
     }
 }
 

@@ -2,6 +2,8 @@ use std::{
     env::args,
     io::{stdin, stdout, Write},
     process::exit,
+    thread,
+    time::Duration,
 };
 
 use lox::{
@@ -49,10 +51,9 @@ fn run_file(vm: &mut Vm, filename: &str) -> Result<()> {
     let source_cstring = std::ffi::CString::new(source).unwrap();
     let source_ptr = source_cstring.as_ptr() as *const u8;
 
-    let mut stack = ValueStack::new();
-    vm.init(&mut stack);
+    vm.reset();
 
-    match vm.interpret(&mut stack, source_ptr) {
+    match vm.interpret(source_ptr) {
         InterpretResult::Ok => (),
         InterpretResult::CompileError => exit(65),
         InterpretResult::RuntimeError => exit(70),
@@ -68,6 +69,8 @@ fn repl(vm: &mut Vm) -> Result<()> {
 
     _ = writeln!(stdout, "Lox interpleter in REPL mode");
 
+    vm.reset();
+
     loop {
         _ = write!(stdout, "> ");
         _ = stdout.flush();
@@ -80,10 +83,7 @@ fn repl(vm: &mut Vm) -> Result<()> {
         let source_cstring = std::ffi::CString::new(line.as_bytes()).unwrap();
         let source_ptr = source_cstring.as_ptr() as *const u8;
 
-        let mut stack = ValueStack::new();
-        vm.init(&mut stack);
-
-        match vm.interpret(&mut stack, source_ptr) {
+        match vm.interpret(source_ptr) {
             InterpretResult::Ok => (),
             InterpretResult::CompileError => exit(65),
             InterpretResult::RuntimeError => exit(70),

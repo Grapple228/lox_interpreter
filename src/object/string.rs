@@ -8,7 +8,7 @@ use crate::{
 
 #[repr(C)]
 pub struct ObjString {
-    pub(super) obj: Obj,
+    pub obj: Obj,
     pub(super) length: usize,
     pub(super) hash: u32,
     // chars идёт сразу после структуры в памяти (flexible array member)
@@ -34,10 +34,16 @@ impl ObjString {
             (*ptr).length = length;
             (*ptr).hash = hash;
 
+            vm.stack.push(Value::Obj(ptr as *mut Obj));
+
             let dest = (ptr as *mut u8).add(size_of::<ObjString>());
             std::ptr::copy_nonoverlapping(chars, dest, length);
             *dest.add(length) = 0;
         }
+
+        vm.strings.set(ptr, Value::Nil);
+
+        vm.stack.pop();
 
         ptr
     }
@@ -56,11 +62,7 @@ impl ObjString {
             return existing;
         }
 
-        let ptr = Self::allocate(vm, chars, length, hash);
-
-        vm.strings.set(ptr, Value::Nil);
-
-        ptr
+        Self::allocate(vm, chars, length, hash)
     }
 
     pub fn copy(vm: &mut Vm, chars: *const u8, length: usize) -> *mut ObjString {

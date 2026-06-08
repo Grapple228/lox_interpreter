@@ -1,0 +1,22 @@
+fun sum(a, b){
+    print a + b;
+}
+
+fun tst() {}
+
+sum(1, "1");
+sum("1", 1);
+sum("1", "1");
+sum(1, 1);
+
+sum(true, "1");
+sum("1", true);
+
+sum(nil, "1");
+sum("1", nil);
+
+sum(tst, "1");
+sum("1", tst);
+
+sum(clock, "1");
+sum("1", clock);

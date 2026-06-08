@@ -1,0 +1,10 @@
+fun makeGarbage(i) {
+    var a = "string" + i;
+    var b = i + "string";
+    return a + b;
+}
+
+for (var i = 0; i < 10000000; i = i + 1) {
+    makeGarbage(i);
+    if (i % 100000 == 0) print i;
+}

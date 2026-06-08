@@ -3,11 +3,13 @@ pub mod utils;
 mod chunk;
 mod dynamic_array;
 mod stack;
+mod table;
 mod value;
 
 pub use chunk::Chunk;
 pub use dynamic_array::DynamicArray;
 pub use stack::Stack;
+pub use table::{Entry, Table};
 pub use value::{Value, ValueResult};
 
 use crate::define_enum_with_values;

@@ -13,10 +13,20 @@ pub struct Table {
     entries: *mut Entry,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Entry {
     key: *mut ObjString,
     value: Value,
+}
+
+impl Entry {
+    pub fn key(&self) -> *mut ObjString {
+        self.key
+    }
+
+    pub fn value(&self) -> Value {
+        self.value
+    }
 }
 
 impl Table {
@@ -221,6 +231,10 @@ impl Table {
         true
     }
 
+    pub fn entry(&self, index: usize) -> Entry {
+        unsafe { *self.entries.add(index) }
+    }
+
     pub fn get(&self, key: *mut ObjString, value: *mut Value) -> bool {
         if self.count == 0 {
             return false;
@@ -302,6 +316,10 @@ impl Table {
         self.count = 0;
         self.capacity = 0;
         self.entries = std::ptr::null_mut();
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.capacity
     }
 }
 

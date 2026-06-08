@@ -4,9 +4,9 @@ fun b(value) { return c(value * 2); }
 
 fun c(value) {
     if(value % 2 == 0) {
-        print "odd";
+        print value + " is odd";
     } else {
-        print "even";
+        print value + " is even";
     }
 
     return value;

@@ -1,15 +1,14 @@
 use crate::{
-    common::{Chunk, DynamicArray, OpCode, Stack, Value},
+    common::{Chunk, DynamicArray, OpCode, Stack, Table, Value},
     object::{FunctionType, Obj, ObjClosure, ObjUpValue},
     parser::get_parser,
     precedence::Precedence,
     scanner::{init_scanner, scan_token, scanner_line},
-    table::Table,
     token::{
         Token,
         TokenType::{self},
     },
-    vm::Vm,
+    vm::{ValueStack, Vm},
     ObjString,
 };
 
@@ -293,6 +292,13 @@ impl CallFrame {
         }
     }
 
+    pub fn callee_obj(&self) -> *mut Obj {
+        match self.callee {
+            Callee::Closure(c) => c as *mut Obj,
+            Callee::Function(f) => f as *mut Obj,
+        }
+    }
+
     pub fn function(&self) -> *mut ObjFunction {
         match self.callee {
             Callee::Closure(ptr) => unsafe { (*ptr).function },
@@ -348,10 +354,10 @@ pub struct Compiler {
     loop_scopes: Stack<256, LoopScope>,        // стек циклов
     break_jumps: DynamicArray<(usize, usize)>, // (offset_jump, scope_index)
 
-    function: *mut ObjFunction,
+    pub(crate) function: *mut ObjFunction,
     typ: FunctionType,
 
-    enclosing: *mut Compiler,
+    pub(crate) enclosing: *mut Compiler,
 }
 
 impl Compiler {
@@ -372,8 +378,6 @@ impl Compiler {
 
             enclosing,
         });
-
-        tracing::warn!("after");
 
         if typ != FunctionType::Script {
             let parser = get_parser();
