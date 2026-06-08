@@ -8,7 +8,7 @@ use crate::{
         Token,
         TokenType::{self},
     },
-    vm::{ValueStack, Vm},
+    vm::Vm,
     ObjString,
 };
 
@@ -383,7 +383,7 @@ impl Compiler {
             let parser = get_parser();
             unsafe {
                 (*compiler.function).name =
-                    ObjString::copy((&mut *vm), parser.previous.start, parser.previous.length)
+                    ObjString::copy(&mut *vm, parser.previous.start, parser.previous.length)
             };
         }
 

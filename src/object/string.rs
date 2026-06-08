@@ -1,5 +1,3 @@
-use std::alloc::{alloc, Layout};
-
 use crate::{
     common::Value,
     object::{Obj, ObjType},

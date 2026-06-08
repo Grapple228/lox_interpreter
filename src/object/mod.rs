@@ -12,10 +12,12 @@ pub use closure::ObjClosure;
 pub use function::{FunctionType, ObjFunction};
 pub use native::{NativeFn, NativeResult, ObjNative};
 pub use string::ObjString;
-use tracing_subscriber::layer;
 pub use upvalue::ObjUpValue;
 
-use crate::{common::Value, gc::Gc, vm::Vm};
+use crate::{
+    common::Value,
+    vm::{Gc, Vm},
+};
 
 #[repr(u8)]
 #[derive(PartialEq, Clone, Copy)]

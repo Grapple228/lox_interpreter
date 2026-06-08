@@ -2,12 +2,10 @@ use std::{
     env::args,
     io::{stdin, stdout, Write},
     process::exit,
-    thread,
-    time::Duration,
 };
 
 use lox::{
-    vm::{InterpretResult, ValueStack, Vm},
+    vm::{InterpretResult, Vm},
     Result,
 };
 

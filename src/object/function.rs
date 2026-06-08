@@ -1,5 +1,3 @@
-use tracing::warn;
-
 use crate::{
     common::{Chunk, Value},
     vm::Vm,

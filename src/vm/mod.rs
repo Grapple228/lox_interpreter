@@ -1,16 +1,14 @@
-// ./src/vm.rs
-
-use tracing::warn;
-
 use crate::{
     common::{OpCode, Stack, Table, Value},
     compiler::{CallFrame, Callee, Compiler},
     object::{FunctionType, NativeFn, NativeResult, ObjClosure, ObjNative, ObjUpValue},
-    token::TokenType::PERCENT,
     Obj, ObjFunction, ObjString, ObjType,
 };
 
+mod gc;
 mod natives;
+
+pub use gc::Gc;
 
 pub const FRAMES_MAX: usize = 64;
 pub const STACK_MAX: usize = FRAMES_MAX * 256;
@@ -375,7 +373,7 @@ impl Vm {
             if cfg!(debug_assertions) {
                 self.stack.debug_content();
                 unsafe {
-                    let frame = unsafe { &mut *frame_ptr };
+                    let frame = &mut *frame_ptr;
 
                     let function_ptr = frame.function();
                     if !function_ptr.is_null() {
@@ -525,9 +523,7 @@ impl Vm {
                     self.stack.set_top(frame.slots as *mut Value);
                     self.stack.push(result);
 
-                    unsafe {
-                        frame_ptr = unsafe { self.frames.as_mut_ptr().add(self.frame_count - 1) };
-                    }
+                    frame_ptr = unsafe { self.frames.as_mut_ptr().add(self.frame_count - 1) };
                 }
 
                 OpCode::OP_CLOSURE => {
@@ -538,7 +534,7 @@ impl Vm {
                     unsafe {
                         for i in 0..(*closure).upvalue_count {
                             let (is_local, index) = {
-                                let frame = unsafe { &mut *frame_ptr };
+                                let frame = &mut *frame_ptr;
 
                                 let is_local = Self::read_byte(frame);
                                 let index = Self::read_byte(frame);
@@ -547,9 +543,8 @@ impl Vm {
                             };
 
                             if is_local == 1 {
-                                let upvalue = self.capture_upvalue(
-                                    unsafe { &mut *frame_ptr }.slots.add(index as usize),
-                                );
+                                let upvalue = self
+                                    .capture_upvalue((&mut *frame_ptr).slots.add(index as usize));
                                 *(*closure).upvalues.add(i) = upvalue;
                             } else {
                                 let enclosing = &self.frames[self.frame_count - 2];

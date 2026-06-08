@@ -1,14 +1,11 @@
-use std::alloc::{realloc, Layout};
-
-use tracing::{debug, warn};
-
 use crate::{
     common::{utils, DynamicArray, Value},
-    compiler::{Callee, Compiler},
     object::{ObjClosure, ObjUpValue},
-    vm::{ValueStack, Vm},
+    vm::Vm,
     Obj, ObjFunction,
 };
+use std::alloc::Layout;
+use tracing::debug;
 
 pub const GC_HEAP_GROW_FACTOR: usize = 2;
 
