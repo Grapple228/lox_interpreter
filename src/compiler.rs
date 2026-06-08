@@ -10,6 +10,7 @@ use crate::{
         TokenType::{self},
     },
     vm::Vm,
+    ObjString,
 };
 
 use crate::ObjFunction;
@@ -363,20 +364,22 @@ impl Compiler {
             locals: [Local::empty(); U8_COUNT],
             upvalues: [UpValue::new(); U8_COUNT],
             loop_scopes: Stack::new(),
-            break_jumps: DynamicArray::new(),
+            break_jumps: DynamicArray::new(unsafe { &mut *vm }),
 
-            function: ObjFunction::new(unsafe { &mut *vm }),
+            function: ObjFunction::allocate(unsafe { &mut *vm }),
             typ,
             vm,
 
             enclosing,
         });
 
+        tracing::warn!("after");
+
         if typ != FunctionType::Script {
             let parser = get_parser();
             unsafe {
                 (*compiler.function).name =
-                    (*vm).copy_string(parser.previous.start, parser.previous.length)
+                    ObjString::copy((&mut *vm), parser.previous.start, parser.previous.length)
             };
         }
 
@@ -612,7 +615,8 @@ impl Compiler {
         let chars = unsafe { parser.previous.start.add(1) };
         let length = parser.previous.length - 2;
 
-        let obj_string = unsafe { (*self.vm).copy_string(chars, length) };
+        let vm = unsafe { &mut *self.vm };
+        let obj_string = ObjString::copy(vm, chars, length);
         self.emit_constant(Value::Obj(obj_string as *mut Obj));
     }
 
@@ -940,7 +944,9 @@ impl Compiler {
     }
 
     fn identifier_constant(&mut self, name: Token) -> usize {
-        let obj_string = unsafe { (*self.vm).copy_string(name.start, name.length) };
+        let vm = unsafe { &mut *self.vm };
+
+        let obj_string = ObjString::copy(vm, name.start, name.length);
 
         // Check if exists in cache
         let mut index = Value::Nil;
@@ -1053,6 +1059,7 @@ impl Compiler {
         if self.loop_scopes.is_empty() {
             self.error("'break' must be inside a loop.");
         }
+
         let scope_depth = self.loop_scopes.peek(0).scope_depth;
         while self.local_count > 0 {
             let local = self.locals[self.local_count - 1];

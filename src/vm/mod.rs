@@ -1,5 +1,7 @@
 // ./src/vm.rs
 
+use tracing::warn;
+
 use crate::{
     common::{OpCode, Stack, Value},
     compiler::{CallFrame, Callee, Compiler},
@@ -157,7 +159,7 @@ impl Vm {
             }
             let a_str = a as *mut ObjString;
             let b_str = b as *mut ObjString;
-            let result = self.concatenate_strings(a_str, b_str);
+            let result = ObjString::concatenate(self, a_str, b_str);
             Some(Value::Obj(result as *mut Obj))
         }
     }
@@ -281,10 +283,10 @@ impl Vm {
         arity: usize,
         function: NativeFn,
     ) {
-        let name_obj = self.copy_string(name.as_ptr(), name.len());
+        let name_obj = ObjString::copy(self, name.as_ptr(), name.len());
         stack.push(Value::Obj(name_obj as *mut Obj));
 
-        let native = ObjNative::new(self, arity, function);
+        let native = ObjNative::allocate(self, arity, function);
         stack.push(Value::Obj(native as *mut Obj));
 
         let key = stack.get(0).as_string();
@@ -310,7 +312,7 @@ impl Vm {
             }
         }
 
-        let created_upvalue = ObjUpValue::new(self, local);
+        let created_upvalue = ObjUpValue::allocate(self, local);
 
         if prev_upvalue.is_null() {
             self.open_upvalues = created_upvalue;
@@ -501,7 +503,7 @@ impl Vm {
 
                 OpCode::OP_CLOSURE => {
                     let function = Self::read_constant(&mut frames[frame_index]).as_function();
-                    let closure = ObjClosure::new(self, function);
+                    let closure = ObjClosure::allocate(self, function);
                     stack.push(Value::Obj(closure as *mut Obj));
 
                     unsafe {
@@ -673,7 +675,8 @@ impl Vm {
     }
 
     pub fn interpret(&mut self, stack: &mut ValueStack, source: *const u8) -> InterpretResult {
-        let mut compiler = Compiler::new(self, FunctionType::Script, std::ptr::null_mut());
+        let mut compiler =
+            Compiler::new(self as *mut Vm, FunctionType::Script, std::ptr::null_mut());
 
         let function = compiler.compile(source);
         if function.is_null() {

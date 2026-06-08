@@ -12,6 +12,7 @@ pub mod token;
 pub mod vm;
 
 mod error;
+mod gc;
 mod macros;
 mod object;
 mod precedence;

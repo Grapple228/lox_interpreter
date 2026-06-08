@@ -15,7 +15,7 @@ pub struct ObjNative {
 }
 
 impl ObjNative {
-    pub fn new(vm: &mut Vm, arity: usize, function: NativeFn) -> *mut ObjNative {
+    pub fn allocate(vm: &mut Vm, arity: usize, function: NativeFn) -> *mut ObjNative {
         let ptr = vm.allocate_obj(size_of::<ObjNative>(), ObjType::Native) as *mut ObjNative;
 
         unsafe {

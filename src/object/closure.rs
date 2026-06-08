@@ -9,7 +9,7 @@ pub struct ObjClosure {
 }
 
 impl ObjClosure {
-    pub fn new(vm: &mut Vm, function: *mut ObjFunction) -> *mut ObjClosure {
+    pub fn allocate(vm: &mut Vm, function: *mut ObjFunction) -> *mut ObjClosure {
         unsafe {
             let upvalue_count = (*function).upvalue_count;
 

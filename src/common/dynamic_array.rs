@@ -1,15 +1,13 @@
-use std::{
-    alloc::{alloc, realloc, Layout},
-    ptr::NonNull,
-};
+use std::ptr::NonNull;
 use tracing::debug;
 
-use crate::common::utils;
+use crate::{common::utils, vm::Vm};
 
 pub struct DynamicArray<T> {
     count: usize,
     capacity: usize,
     values: Option<NonNull<T>>,
+    vm: *mut Vm,
 }
 
 impl<T> DynamicArray<T> {
@@ -27,63 +25,49 @@ impl<T> DynamicArray<T> {
         }
     }
 
-    pub fn new() -> Self {
+    pub fn new(vm: &mut Vm) -> Self {
         debug!("Dynamic array is initialized");
 
         Self {
             count: 0,
             capacity: 0,
             values: None,
+            vm,
         }
     }
 
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub fn with_capacity(vm: &mut Vm, capacity: usize) -> Self {
         if capacity == 0 {
-            return Self::new();
+            return Self::new(vm);
         }
 
-        let layout = Layout::array::<T>(capacity).unwrap();
-        let ptr = unsafe { alloc(layout) };
+        let ptr = vm.allocate_array(capacity);
 
         Self {
             count: 0,
             capacity,
-            values: NonNull::new(ptr as *mut T),
+            values: NonNull::new(ptr),
+            vm,
         }
     }
 
-    fn grow_array(ptr: Option<NonNull<T>>, old_size: usize, new_size: usize) -> Option<NonNull<T>> {
+    fn grow_array(
+        &mut self,
+        ptr: Option<NonNull<T>>,
+        old_size: usize,
+        new_size: usize,
+    ) -> Option<NonNull<T>> {
         debug!("Grow array from {} to {}", old_size, new_size);
 
-        if new_size == 0 {
-            return None;
-        }
+        let vm = unsafe { &mut *self.vm };
+        let new_ptr = vm.reallocate(
+            ptr.map(|p| p.as_ptr() as *mut u8)
+                .unwrap_or(std::ptr::null_mut()),
+            old_size * size_of::<T>(),
+            new_size * size_of::<T>(),
+        );
 
-        let new_layout = Layout::array::<T>(new_size).unwrap();
-
-        match ptr {
-            Some(old_ptr) => {
-                if old_size == 0 {
-                    let new_ptr = unsafe { alloc(new_layout) };
-                    NonNull::new(new_ptr as *mut T)
-                } else {
-                    let old_layout = Layout::array::<T>(old_size).unwrap();
-                    let ptr_u8 = old_ptr.as_ptr() as *mut u8;
-                    let new_ptr_u8 = unsafe { realloc(ptr_u8, old_layout, new_layout.size()) };
-                    if new_ptr_u8.is_null() {
-                        panic!("Memory reallocation failed");
-                    }
-                    NonNull::new(new_ptr_u8 as *mut T)
-                }
-            }
-            None => {
-                let new_ptr = unsafe { alloc(new_layout) };
-                if new_ptr.is_null() {
-                    panic!("Memory allocation failed");
-                }
-                NonNull::new(new_ptr as *mut T)
-            }
-        }
+        NonNull::new(new_ptr as *mut T)
     }
 
     pub fn write(&mut self, value: T) {
@@ -94,7 +78,7 @@ impl<T> DynamicArray<T> {
         if self.capacity < self.count + 1 {
             let old_capacity = self.capacity;
             self.capacity = utils::grow_capacity(old_capacity);
-            self.values = Self::grow_array(self.values, old_capacity, self.capacity);
+            self.values = self.grow_array(self.values, old_capacity, self.capacity);
         }
 
         let Some(values_ptr) = self.values.as_mut() else {
@@ -192,11 +176,37 @@ impl<T> DynamicArray<T> {
     pub fn len(&self) -> usize {
         self.count
     }
-}
 
-impl<T> Default for DynamicArray<T> {
-    fn default() -> Self {
-        Self::new()
+    pub fn size(&self) -> usize {
+        self.capacity * size_of::<T>()
+    }
+
+    pub fn free(&mut self) {
+        let size = self.size();
+
+        if self.capacity > 0 {
+            if let Some(values_ptr) = self.values {
+                unsafe {
+                    // Дропаем элементы
+                    for i in 0..self.count {
+                        values_ptr.as_ptr().add(i).drop_in_place();
+                    }
+                    // Освобождаем память
+                    let vm = &mut *self.vm;
+                    let ptr = values_ptr.as_ptr() as *mut u8;
+
+                    vm.reallocate(ptr, size, 0);
+
+                    self.values = None;
+                    self.capacity = 0;
+                    self.count = 0;
+                }
+            }
+        }
+
+        debug!("DynamicArray freed {} bytes, total: {}", size, unsafe {
+            (*self.vm).bytes_allocated
+        });
     }
 }
 

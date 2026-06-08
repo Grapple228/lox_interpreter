@@ -1,3 +1,5 @@
+use tracing::warn;
+
 use crate::{
     common::{Chunk, Value},
     vm::Vm,
@@ -30,14 +32,14 @@ impl ObjFunction {
         self.name
     }
 
-    pub fn new(vm: &mut Vm) -> *mut ObjFunction {
+    pub fn allocate(vm: &mut Vm) -> *mut ObjFunction {
         let ptr = vm.allocate_obj(size_of::<ObjFunction>(), ObjType::Function) as *mut ObjFunction;
 
         unsafe {
             (*ptr).arity = 0;
             (*ptr).upvalue_count = 0;
             (*ptr).name = std::ptr::null();
-            (*ptr).chunk = Chunk::new();
+            (*ptr).chunk = Chunk::new(vm);
         }
 
         ptr

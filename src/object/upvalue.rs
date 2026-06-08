@@ -9,7 +9,7 @@ pub struct ObjUpValue {
 }
 
 impl ObjUpValue {
-    pub fn new(vm: &mut Vm, slot: *mut Value) -> *mut ObjUpValue {
+    pub fn allocate(vm: &mut Vm, slot: *mut Value) -> *mut ObjUpValue {
         let ptr = vm.allocate_obj(size_of::<ObjUpValue>(), ObjType::UpValue) as *mut ObjUpValue;
 
         unsafe {

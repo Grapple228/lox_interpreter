@@ -1,10 +1,13 @@
 use tracing::debug;
 
-use crate::common::{
-    dynamic_array::DynamicArray,
-    LineRun,
-    OpCode::{self},
-    Value,
+use crate::{
+    common::{
+        dynamic_array::DynamicArray,
+        LineRun,
+        OpCode::{self},
+        Value,
+    },
+    vm::Vm,
 };
 
 pub struct Chunk {
@@ -26,25 +29,28 @@ impl Chunk {
         self.code.as_mut_ptr()
     }
 
-    pub fn new() -> Self {
+    pub fn new(vm: &mut Vm) -> Self {
         debug!("Chunk is initialized");
 
-        Self {
-            code: DynamicArray::new(),
-            constants: DynamicArray::new(),
-            lines: DynamicArray::new(),
-        }
+        let res = Self {
+            code: DynamicArray::new(vm),
+            constants: DynamicArray::new(vm),
+            lines: DynamicArray::new(vm),
+        };
+
+        res
     }
 
     pub fn with_capacity(
+        vm: &mut Vm,
         code_capacity: usize,
         constants_capacity: usize,
         lines_capacity: usize,
     ) -> Self {
         Self {
-            code: DynamicArray::with_capacity(code_capacity),
-            constants: DynamicArray::with_capacity(constants_capacity),
-            lines: DynamicArray::with_capacity(lines_capacity),
+            code: DynamicArray::with_capacity(vm, code_capacity),
+            constants: DynamicArray::with_capacity(vm, constants_capacity),
+            lines: DynamicArray::with_capacity(vm, lines_capacity),
         }
     }
 
@@ -292,6 +298,16 @@ impl Chunk {
 
         None
     }
+
+    pub fn size(&self) -> usize {
+        self.code.size() + self.constants.size() + self.lines.size()
+    }
+
+    pub fn free(&mut self) {
+        self.code.free();
+        self.constants.free();
+        self.lines.free();
+    }
 }
 
 impl std::fmt::Debug for Chunk {
@@ -301,11 +317,5 @@ impl std::fmt::Debug for Chunk {
             .field("capacity", &self.code.capacity())
             .field("code", &"<raw pointer>")
             .finish()
-    }
-}
-
-impl Default for Chunk {
-    fn default() -> Self {
-        Self::new()
     }
 }
