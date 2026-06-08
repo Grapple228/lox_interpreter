@@ -50,6 +50,7 @@ This project follows the implementation from Robert Nystrom's excellent book, wi
 
 ### Runtime
 - **Bytecode Compiler** - Compiles source to efficient bytecode
+- **Closure Optimization** - Functions without captured variables use lightweight ObjFunction instead of ObjClosure
 - **Stack-based VM** - Fast execution with minimal overhead
 - **Garbage Collector** - Mark-sweep collector with automatic heap management
 - **Native Functions** - Rust functions that can be called from Lox code
@@ -207,6 +208,12 @@ The interpreter consists of four main components:
 - **Call Frames** - 64 frames maximum for function calls
 - **Heap** - Dynamic memory for strings, functions, closures, and upvalues
 
+### Memory Optimizations
+- **Closure optimization** - Functions without upvalues avoid closure allocation (~80 bytes saved per function)
+- **String interning** - Duplicate strings share memory
+- **Constant caching** - Global variable identifiers cached to avoid repeated string allocation
+- **GC with weak references** - String table doesn't prevent garbage collection
+
 ### Garbage Collection
 - **Tricolor Abstraction** - White (unreached), Gray (worklist), Black (processed)
 - **Weak References** - String interning table doesn't prevent collection
@@ -256,6 +263,7 @@ These features are open for contribution! See [Contributing](#contributing) sect
 This implementation follows the book's design but adds:
 - Complete GC implementation with weak references
 - String interning optimization
+- Closure optimization - only wraps functions that actually need upvalues (saves ~80 bytes per function)
 - `continue` and `break` keywords in loops
 - Better error handling and reporting
 - Binary `%` (modulo) operator
