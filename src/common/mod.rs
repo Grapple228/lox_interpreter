@@ -58,5 +58,6 @@ define_enum_with_values! {
         OP_SET_PROPERTY = 32 => "OP_SET_PROPERTY",
         OP_GET_PROPERTY = 33 => "OP_GET_PROPERTY",
         OP_METHOD = 34 => "OP_METHOD",
+        OP_INVOKE = 35 => "OP_INVOKE",
     }
 }

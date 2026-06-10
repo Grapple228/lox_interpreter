@@ -591,6 +591,10 @@ impl Compiler {
         if can_assign && self.matches(TokenType::EQUAL) {
             self.expression();
             self.emit_bytes(OpCode::OP_SET_PROPERTY as u8, name as u8);
+        } else if self.matches(TokenType::LEFT_PAREN) {
+            let arg_count = self.argument_list();
+            self.emit_bytes(OpCode::OP_INVOKE as u8, name as u8);
+            self.emit_byte(arg_count as u8);
         } else {
             self.emit_bytes(OpCode::OP_GET_PROPERTY as u8, name as u8);
         }

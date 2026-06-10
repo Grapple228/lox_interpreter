@@ -1,0 +1,203 @@
+// class_benchmark.lox
+// Бенчмарк производительности классов и методов
+
+// ============================================
+// 1. Создание объектов
+// ============================================
+class Empty {}
+
+print "=== Class Creation Benchmark ===";
+var start = clock();
+var iterations = 1000000;
+
+var i = 0;
+while (i < iterations) {
+    var obj = Empty();
+    i = i + 1;
+}
+var elapsed = clock() - start;
+print "Creating " + iterations + " empty objects: " + elapsed + "s";
+print "";
+
+// ============================================
+// 2. Доступ к полям
+// ============================================
+class Point {
+    init(x, y) {
+        this.x = x;
+        this.y = y;
+    }
+}
+
+print "=== Field Access Benchmark ===";
+var p = Point(0, 0);
+start = clock();
+i = 0;
+
+while (i < iterations) {
+    p.x = i;
+    p.y = i + 1;
+    var a = p.x;
+    var b = p.y;
+    i = i + 1;
+}
+elapsed = clock() - start;
+print "Field access (" + iterations + " ops): " + elapsed + "s";
+print "";
+
+// ============================================
+// 3. Вызов методов
+// ============================================
+class Counter {
+    init() {
+        this.count = 0;
+    }
+
+    inc() {
+        this.count = this.count + 1;
+    }
+
+    get() {
+        return this.count;
+    }
+}
+
+print "=== Method Call Benchmark ===";
+var c = Counter();
+start = clock();
+i = 0;
+
+while (i < iterations) {
+    c.inc();
+    i = i + 1;
+}
+elapsed = clock() - start;
+print "Method calls (" + iterations + "): " + elapsed + "s";
+print "Final count: " + c.get();
+print "";
+
+// ============================================
+// 4. Сравнение field vs method access
+// ============================================
+class Data {
+    init() {
+        this.value = 0;
+    }
+
+    getValue() {
+        return this.value;
+    }
+}
+
+print "=== Field vs Method Access ===";
+var d = Data();
+d.value = 42;
+
+// Прямой доступ к полю
+start = clock();
+i = 0;
+while (i < iterations) {
+    var v = d.value;
+    i = i + 1;
+}
+var fieldTime = clock() - start;
+
+// Доступ через метод
+start = clock();
+i = 0;
+while (i < iterations) {
+    var v = d.getValue();
+    i = i + 1;
+}
+var methodTime = clock() - start;
+
+print "Field access: " + fieldTime + "s";
+print "Method access: " + methodTime + "s";
+var ratio = methodTime / fieldTime;
+print "Method is " + ratio + "x slower";
+print "";
+
+// ============================================
+// 5. Методы с аргументами
+// ============================================
+class Calculator {
+    add(a, b) {
+        return a + b;
+    }
+
+    mul(a, b) {
+        return a * b;
+    }
+}
+
+print "=== Methods with Arguments ===";
+var calc = Calculator();
+start = clock();
+i = 0;
+
+while (i < iterations) {
+    var a = calc.add(i, i + 1);
+    var b = calc.mul(i, 2);
+    i = i + 1;
+}
+elapsed = clock() - start;
+print "Methods with args (" + iterations + " calls): " + elapsed + "s";
+print "";
+
+// ============================================
+// 6. Сравнение с обычными функциями
+// ============================================
+fun plainAdd(a, b) {
+    return a + b;
+}
+
+print "=== Method vs Plain Function ===";
+start = clock();
+i = 0;
+while (i < iterations) {
+    var v = plainAdd(i, i + 1);
+    i = i + 1;
+}
+var funcTime = clock() - start;
+
+start = clock();
+i = 0;
+while (i < iterations) {
+    var v = calc.add(i, i + 1);
+    i = i + 1;
+}
+var methodCallTime = clock() - start;
+
+print "Plain function: " + funcTime + "s";
+print "Method: " + methodCallTime + "s";
+print "Method is " + (methodCallTime / funcTime) + "x slower";
+print "";
+
+// ============================================
+// 7. Создание и инициализация
+// ============================================
+print "=== Create + Init Benchmark ===";
+class Heavy {
+    init(a, b, c, d) {
+        this.a = a;
+        this.b = b;
+        this.c = c;
+        this.d = d;
+    }
+}
+
+start = clock();
+i = 0;
+while (i < 500000) {
+    var obj = Heavy(i, i + 1, i + 2, i + 3);
+    i = i + 1;
+}
+elapsed = clock() - start;
+print "Create + init 500k objects: " + elapsed + "s";
+print "";
+
+// ============================================
+// ИТОГО
+// ============================================
+print "=== Summary ===";
+print "All benchmarks completed on " + iterations + " iterations";

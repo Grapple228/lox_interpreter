@@ -1,0 +1,45 @@
+class Foo {
+  method() {}
+}
+
+var start = clock();
+var batches = 0;
+
+while (clock() - start < 10) {
+  var i = 0;
+  while (i < 10000) {
+    var foo = Foo();
+    foo.method();
+    i = i + 1;
+  }
+  batches = batches + 1;
+}
+
+print batches;
+
+class Foo {
+  method() {}
+}
+
+var foo = Foo();  // создаем один раз
+var start = clock();
+var batches = 0;
+
+while (clock() - start < 10) {
+  var i = 0;
+  while (i < 10000) {
+    foo.method();  // только вызов метода
+    i = i + 1;
+  }
+  batches = batches + 1;
+}
+
+print batches;
+
+// before opts:
+// 10199 13611
+// 10082 13441
+
+// after opts:
+//
+//

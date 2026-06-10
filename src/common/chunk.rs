@@ -126,6 +126,8 @@ impl Chunk {
             OpCode::OP_JUMP_IF_FALSE => self.jump_instruction(op_code, 1, offset),
             OpCode::OP_LOOP => self.jump_instruction(op_code, -1, offset),
 
+            OpCode::OP_INVOKE => self.invoke_instruction(op_code, offset),
+
             OpCode::OP_CLOSURE => {
                 let mut offset = offset + 1;
 
@@ -161,6 +163,20 @@ impl Chunk {
 
             _ => Self::simple_instruction(op_code, offset),
         }
+    }
+
+    fn invoke_instruction(&self, op_code: OpCode, offset: usize) -> usize {
+        let constant = self.code[offset + 1];
+        let arg_count = self.code[offset + 2];
+        println!(
+            "{:16} ({} args) {} '{}'",
+            op_code.name(),
+            arg_count,
+            constant,
+            self.constants[constant as usize]
+        );
+
+        offset + 3
     }
 
     fn jump_instruction(&self, op_code: OpCode, sign: isize, offset: usize) -> usize {

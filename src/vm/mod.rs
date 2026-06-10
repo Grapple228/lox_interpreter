@@ -425,6 +425,43 @@ impl Vm {
         self.stack.pop();
     }
 
+    fn invoke_from_class(
+        &mut self,
+        class: *mut ObjClass,
+        name: *mut ObjString,
+        arg_count: usize,
+    ) -> bool {
+        let mut method = Value::Nil;
+
+        if unsafe { !(*class).methods.get(name, &mut method) } {
+            let name = unsafe { (*name).as_str() };
+            self.runtime_error(&format!("Undefined property '{}'.", name));
+            return false;
+        }
+
+        self.call_closure(method.as_closure(), arg_count)
+    }
+
+    fn invoke(&mut self, name: *mut ObjString, arg_count: usize) -> bool {
+        let receiver = self.stack.peek(arg_count);
+
+        if !receiver.is_instance() {
+            self.runtime_error("Only instances have methods.");
+            return false;
+        }
+
+        let instance = receiver.as_instance();
+
+        let mut value = Value::Nil;
+        if unsafe { (*instance).fields.get(name, &mut value) } {
+            let len = self.stack.len() - arg_count;
+            self.stack.set(len, value);
+            return self.call_value(value, arg_count);
+        }
+
+        self.invoke_from_class(unsafe { (*instance).class }, name, arg_count)
+    }
+
     fn run(&mut self) -> InterpretResult {
         let mut frame_ptr = unsafe { self.frames.as_mut_ptr().add(self.frame_count - 1) };
 
@@ -448,6 +485,23 @@ impl Vm {
             };
 
             match op {
+                OpCode::OP_INVOKE => {
+                    let Some(method) = self.read_string(unsafe { &mut *frame_ptr }) else {
+                        self.runtime_error("Method name must be a string.");
+                        return InterpretResult::RuntimeError;
+                    };
+
+                    let frame = unsafe { &mut *frame_ptr };
+
+                    let arg_count = Self::read_byte(frame) as usize;
+
+                    if !self.invoke(method, arg_count) {
+                        return InterpretResult::RuntimeError;
+                    };
+
+                    frame_ptr = unsafe { self.frames.as_mut_ptr().add(self.frame_count - 1) };
+                }
+
                 OpCode::OP_METHOD => {
                     let Some(name_str) = self.read_string(unsafe { &mut *frame_ptr }) else {
                         self.runtime_error("Method name must be a string.");
