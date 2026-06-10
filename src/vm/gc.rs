@@ -160,6 +160,7 @@ impl Gc {
                     let class = object as *mut ObjClass;
                     Self::mark_obj(vm, (*class).name as *mut Obj);
                     Self::mark_table(vm, &mut (*class).methods);
+                    Self::mark_obj(vm, (*class).init_method as *mut Obj);
                 }
                 crate::ObjType::Instance => {
                     let instance = object as *mut ObjInstance;

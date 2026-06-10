@@ -1,0 +1,50 @@
+// init_benchmark.lox
+// Бенчмарк для измерения скорости вызова init метода
+
+class WithInit {
+    init(a, b, c) {
+        this.a = a;
+        this.b = b;
+        this.c = c;
+    }
+}
+
+class WithoutInit {
+    set(a, b, c) {
+        this.a = a;
+        this.b = b;
+        this.c = c;
+    }
+}
+
+var iterations = 1000000;
+
+print "=== Init Method Call Benchmark ===";
+print "";
+
+// Тест с init
+var start = clock();
+var i = 0;
+while (i < iterations) {
+    var obj = WithInit(i, i + 1, i + 2);
+    i = i + 1;
+}
+var withInitTime = clock() - start;
+print "With init (" + iterations + "): " + withInitTime + "s";
+
+// Тест без init (сеттер)
+var start = clock();
+var i = 0;
+while (i < iterations) {
+    var obj = WithoutInit();
+    obj.set(i, i + 1, i + 2);
+    i = i + 1;
+}
+var withoutInitTime = clock() - start;
+print "Without init (" + iterations + "): " + withoutInitTime + "s";
+print "";
+
+// Сравнение
+var diff = withInitTime - withoutInitTime;
+var percent = (diff / withoutInitTime) * 100;
+print "Difference: " + diff + "s (" + percent + "%)";

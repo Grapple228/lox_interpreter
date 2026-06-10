@@ -1,5 +1,6 @@
 use crate::{
     common::{Table, Value},
+    object::ObjClosure,
     vm::Vm,
     Obj, ObjString, ObjType,
 };
@@ -9,6 +10,7 @@ pub struct ObjClass {
     pub(super) obj: Obj,
     pub name: *const ObjString,
     pub methods: Table,
+    pub init_method: *mut ObjClosure,
 }
 
 impl ObjClass {
@@ -23,6 +25,7 @@ impl ObjClass {
         unsafe {
             (*ptr).name = name;
             (*ptr).methods = Table::new();
+            (*ptr).init_method = std::ptr::null_mut();
         }
 
         ptr

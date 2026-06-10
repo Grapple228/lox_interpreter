@@ -296,12 +296,10 @@ impl Vm {
                     let pos = self.stack.len() - arg_count - 1;
                     self.stack.set(pos, Value::Obj(instance as *mut Obj));
 
-                    let mut initializer = Value::Nil;
-
-                    if unsafe { (*class).methods.get(self.init_string, &mut initializer) } {
-                        if initializer.is_closure() {
-                            return self.call_closure(initializer.as_closure(), arg_count);
-                        }
+                    // Get init method from cached value
+                    let init_method = unsafe { (*class).init_method };
+                    if !init_method.is_null() {
+                        return self.call_closure(init_method, arg_count);
                     }
 
                     // Если init нет, проверяем что нет аргументов
@@ -310,7 +308,6 @@ impl Vm {
                         return false;
                     }
 
-                    // Удаляем аргументы (их нет) и оставляем instance
                     return true;
                 }
 
@@ -419,9 +416,17 @@ impl Vm {
     fn define_method(&mut self, name: *mut ObjString) {
         let method = *self.stack.peek(0);
         let class = self.stack.peek(1).as_class();
+
         unsafe {
-            (*class).methods.set(name, method);
+            if name == self.init_string {
+                // init method, don't add to methods table
+                // save as init_ptr
+                (*class).init_method = method.as_closure();
+            } else {
+                (*class).methods.set(name, method);
+            }
         }
+
         self.stack.pop();
     }
 
