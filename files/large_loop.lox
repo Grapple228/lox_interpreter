@@ -1,0 +1,34 @@
+var count = 30000000;
+var iterations = 5;
+
+print "Running " + iterations + " iterations of " + count + " loops";
+print "=========================================";
+
+var while_total = 0;
+var for_total = 0;
+
+for (var n = 0; n < iterations; n = n + 1) {
+    // While loop test
+    var i = 0;
+    var start = clock();
+    while (i < count) {
+        i = i + 1;
+    }
+    var while_time = clock() - start;
+    while_total = while_total + while_time;
+
+    // For loop test
+    start = clock();
+    for (var j = 0; j < count; j = j + 1) {
+        // empty body
+    }
+    var for_time = clock() - start;
+    for_total = for_total + for_time;
+
+    print "Run " + (n + 1) + ": while=" + while_time + "s, for=" + for_time + "s";
+}
+
+print "=========================================";
+print "While average: " + (while_total / iterations) + "s";
+print "For average:   " + (for_total / iterations) + "s";
+print "Difference:    " + ((while_total - for_total) / iterations) + "s";
