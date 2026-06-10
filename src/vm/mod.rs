@@ -415,18 +415,14 @@ impl Vm {
                         return InterpretResult::RuntimeError;
                     };
 
-                    let mut value: Value = Value::Nil;
-                    if unsafe { &(*instance).fields }.get(name_str, &mut value) {
-                        self.stack.pop(); // Instance
-                        self.stack.push(value);
-                        continue;
-                    }
+                    let mut field_value: Value = Value::Nil;
 
-                    self.runtime_error(&format!("Undefined property '{}'", unsafe {
-                        (&*name_str).as_str()
-                    }));
-                    return InterpretResult::RuntimeError;
+                    unsafe { &(*instance).fields }.get(name_str, &mut field_value);
+
+                    self.stack.pop(); // Instance
+                    self.stack.push(field_value);
                 }
+
                 OpCode::OP_SET_PROPERTY => {
                     let value = self.stack.peek(1);
                     if !value.is_instance() {
@@ -441,9 +437,20 @@ impl Vm {
                         return InterpretResult::RuntimeError;
                     };
 
-                    unsafe { &mut (*instance).fields }.set(name_str, *self.stack.peek(0));
                     let value = self.stack.pop();
-                    self.stack.pop();
+
+                    if value.is_nil() {
+                        // remove
+                        if cfg!(debug_assertions) {
+                            let name = unsafe { (&*name_str).as_str() };
+                            tracing::debug!("field {} removed", name);
+                        }
+                        unsafe { &mut (*instance).fields }.delete(name_str);
+                    } else {
+                        unsafe { &mut (*instance).fields }.set(name_str, value);
+                    }
+
+                    self.stack.pop(); // instance
                     self.stack.push(value);
                 }
 

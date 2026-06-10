@@ -1,12 +1,25 @@
+// define class
 class Pair {}
 
-var pair = Pair();
-pair.first = 1;
-pair.second = 2;
-print pair.first + pair.second; // 3.
+// create instance 1
+var pair1 = Pair();
+pair1.first = 1;
+pair1.second = 2;
+print pair1.first + pair1.second; // 3
+
+// create instance 2
+var pair2 = Pair();
+pair2.first = 4;
+pair2.second = 3;
+print pair2.first + pair2.second; // 7
 
 class Main {}
 var main = Main();
 main.hello = "st";
 
-print pair.first + main.hello; // "1st"
+print pair1.first + main.hello; // "1st"
+print pair1.non_existing; // nil
+
+// this should remove entry from table
+main.hello = nil;
+print main.hello; // nil
