@@ -1,6 +1,6 @@
 use crate::{
-    common::{utils, DynamicArray, Value},
-    object::{ObjClosure, ObjUpValue},
+    common::{utils, DynamicArray, Table, Value},
+    object::{ObjClass, ObjClosure, ObjInstance, ObjUpValue},
     vm::Vm,
     Obj, ObjFunction,
 };
@@ -92,7 +92,8 @@ impl Gc {
             upvalue = unsafe { (*upvalue).next };
         }
 
-        Self::mark_table(vm);
+        let globals = &mut vm.globals as *mut Table;
+        Self::mark_table(vm, globals);
         Self::mark_compiler_roots(vm);
     }
 
@@ -106,9 +107,11 @@ impl Gc {
         }
     }
 
-    fn mark_table(vm: &mut Vm) {
-        for i in 0..vm.globals.capacity() {
-            let entry = vm.globals.entry(i);
+    fn mark_table(vm: &mut Vm, table: *mut Table) {
+        let table = unsafe { &mut *table };
+
+        for i in 0..table.capacity() {
+            let entry = table.entry(i);
             Self::mark_obj(vm, entry.key() as *mut Obj);
             Self::mark_value(vm, entry.value());
         }
@@ -151,6 +154,15 @@ impl Gc {
                     for i in 0..(*closure).upvalue_count {
                         Self::mark_obj(vm, (*closure).upvalues.add(i) as *mut Obj);
                     }
+                }
+                crate::ObjType::Class => {
+                    let class = object as *mut ObjClass;
+                    Self::mark_obj(vm, (*class).name as *mut Obj);
+                }
+                crate::ObjType::Instance => {
+                    let instance = object as *mut ObjInstance;
+                    Self::mark_obj(vm, (*instance).class as *mut Obj);
+                    Self::mark_table(vm, &mut (*instance).fields);
                 }
             }
         }

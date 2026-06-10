@@ -1,7 +1,10 @@
 use crate::{
     common::{OpCode, Stack, Table, Value},
     compiler::{CallFrame, Callee, Compiler},
-    object::{FunctionType, NativeFn, NativeResult, ObjClosure, ObjNative, ObjUpValue},
+    object::{
+        FunctionType, NativeFn, NativeResult, ObjClass, ObjClosure, ObjInstance, ObjNative,
+        ObjUpValue,
+    },
     Obj, ObjFunction, ObjString, ObjType,
 };
 
@@ -264,6 +267,16 @@ impl Vm {
     fn call_value(&mut self, callee: Value, arg_count: usize) -> bool {
         if callee.is_obj() {
             match unsafe { (*callee.as_obj()).typ() } {
+                ObjType::Class => {
+                    let class = callee.as_class();
+
+                    let instance = ObjInstance::allocate(self, class);
+                    let pos = self.stack.len() - arg_count - 1;
+                    self.stack.set(pos, Value::Obj(instance as *mut Obj));
+
+                    return true;
+                }
+
                 ObjType::Closure => {
                     return self.call_closure(callee.as_closure(), arg_count);
                 }
@@ -389,6 +402,61 @@ impl Vm {
             };
 
             match op {
+                OpCode::OP_GET_PROPERTY => {
+                    let value = self.stack.peek(0);
+                    if !value.is_instance() {
+                        self.runtime_error("Only instances have properties.");
+                        return InterpretResult::RuntimeError;
+                    }
+
+                    let instance = value.as_instance();
+                    let Some(name_str) = self.read_string(unsafe { &mut *frame_ptr }) else {
+                        self.runtime_error("Property name must be a string.");
+                        return InterpretResult::RuntimeError;
+                    };
+
+                    let mut value: Value = Value::Nil;
+                    if unsafe { &(*instance).fields }.get(name_str, &mut value) {
+                        self.stack.pop(); // Instance
+                        self.stack.push(value);
+                        continue;
+                    }
+
+                    self.runtime_error(&format!("Undefined property '{}'", unsafe {
+                        (&*name_str).as_str()
+                    }));
+                    return InterpretResult::RuntimeError;
+                }
+                OpCode::OP_SET_PROPERTY => {
+                    let value = self.stack.peek(1);
+                    if !value.is_instance() {
+                        self.runtime_error("Only instances have fields.");
+                        return InterpretResult::RuntimeError;
+                    }
+
+                    let instance = value.as_instance();
+
+                    let Some(name_str) = self.read_string(unsafe { &mut *frame_ptr }) else {
+                        self.runtime_error("Property name must be a string.");
+                        return InterpretResult::RuntimeError;
+                    };
+
+                    unsafe { &mut (*instance).fields }.set(name_str, *self.stack.peek(0));
+                    let value = self.stack.pop();
+                    self.stack.pop();
+                    self.stack.push(value);
+                }
+
+                OpCode::OP_CLASS => {
+                    let Some(name_str) = self.read_string(unsafe { &mut *frame_ptr }) else {
+                        self.runtime_error("Class name must be a string.");
+                        return InterpretResult::RuntimeError;
+                    };
+
+                    let class = ObjClass::allocate(self, name_str);
+                    self.stack.push(Value::Obj(class as *mut Obj));
+                }
+
                 OpCode::OP_JUMP_IF_FALSE => {
                     let frame = unsafe { &mut *frame_ptr };
 
@@ -606,8 +674,6 @@ impl Vm {
                                     return InterpretResult::RuntimeError;
                                 }
                             }
-                            // self.runtime_error("Operands must be numbers or strings.");
-                            // return InterpretResult::RuntimeError;
                         }
                     }
                 }

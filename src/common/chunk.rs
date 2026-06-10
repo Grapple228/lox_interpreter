@@ -108,14 +108,17 @@ impl Chunk {
         match op_code {
             OpCode::OP_CONSTANT_LONG => self.constant_long_instruction(op_code, offset),
             OpCode::OP_CONSTANT => self.constant_instruction(op_code, offset),
+            OpCode::OP_CLASS => self.constant_instruction(op_code, offset),
             OpCode::OP_DEFINE_GLOBAL => self.constant_instruction(op_code, offset),
             OpCode::OP_GET_GLOBAL => self.constant_instruction(op_code, offset),
             OpCode::OP_SET_GLOBAL => self.constant_instruction(op_code, offset),
+            OpCode::OP_GET_PROPERTY => self.constant_instruction(op_code, offset),
+            OpCode::OP_SET_PROPERTY => self.constant_instruction(op_code, offset),
+
             OpCode::OP_SET_LOCAL => self.byte_instruction(op_code, offset),
             OpCode::OP_GET_LOCAL => self.byte_instruction(op_code, offset),
             OpCode::OP_SET_UPVALUE => self.byte_instruction(op_code, offset),
             OpCode::OP_GET_UPVALUE => self.byte_instruction(op_code, offset),
-
             OpCode::OP_CALL => self.byte_instruction(op_code, offset),
 
             OpCode::OP_JUMP => self.jump_instruction(op_code, 1, offset),

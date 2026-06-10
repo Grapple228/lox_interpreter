@@ -2,14 +2,18 @@ use std::alloc::{alloc, dealloc, realloc, Layout};
 
 use tracing::debug;
 
+mod class;
 mod closure;
 mod function;
+mod instance;
 mod native;
 mod string;
 mod upvalue;
 
+pub use class::ObjClass;
 pub use closure::ObjClosure;
 pub use function::{FunctionType, ObjFunction};
+pub use instance::ObjInstance;
 pub use native::{NativeFn, NativeResult, ObjNative};
 pub use string::ObjString;
 pub use upvalue::ObjUpValue;
@@ -27,6 +31,8 @@ pub enum ObjType {
     Native = 3,
     Closure = 4,
     UpValue = 5,
+    Class = 6,
+    Instance = 7,
 }
 
 impl std::fmt::Display for ObjType {
@@ -37,6 +43,8 @@ impl std::fmt::Display for ObjType {
             Self::Native => write!(f, "native"),
             Self::Closure => write!(f, "closure"),
             Self::UpValue => write!(f, "upvalue"),
+            Self::Class => write!(f, "class"),
+            Self::Instance => write!(f, "instance"),
         }
     }
 }
@@ -77,6 +85,14 @@ impl std::fmt::Display for Obj {
             ObjType::UpValue => {
                 let obj_upvalue = self as *const Obj as *const ObjUpValue;
                 unsafe { write!(f, "{}", &*obj_upvalue) }
+            }
+            ObjType::Class => {
+                let obj_class = self as *const Obj as *const ObjClass;
+                unsafe { write!(f, "{}", &*obj_class) }
+            }
+            ObjType::Instance => {
+                let instance = self as *const Obj as *const ObjInstance;
+                unsafe { write!(f, "{}", &*instance) }
             }
         }
     }
@@ -170,6 +186,8 @@ impl Vm {
             ObjType::Closure => ObjClosure::deallocate(obj as *mut ObjClosure),
             ObjType::UpValue => ObjUpValue::deallocate(obj as *mut ObjUpValue),
             ObjType::Native => ObjNative::deallocate(obj as *mut ObjNative),
+            ObjType::Class => ObjClass::deallocate(obj as *mut ObjClass),
+            ObjType::Instance => ObjInstance::deallocate(obj as *mut ObjInstance),
         }
     }
 
@@ -255,6 +273,15 @@ impl Object for ObjClosure {
     }
 }
 
+impl Object for ObjInstance {
+    fn free_extra(obj: *mut Self) -> usize {
+        unsafe {
+            (*obj).fields.free();
+        }
+        0
+    }
+}
+
 impl Object for ObjFunction {
     fn free_extra(obj: *mut Self) -> usize {
         unsafe {
@@ -266,3 +293,4 @@ impl Object for ObjFunction {
 
 impl Object for ObjUpValue {}
 impl Object for ObjNative {}
+impl Object for ObjClass {}

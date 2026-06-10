@@ -54,5 +54,8 @@ define_enum_with_values! {
         OP_GET_UPVALUE = 28 => "OP_GET_UPVALUE",
         OP_SET_UPVALUE = 29 => "OP_SET_UPVALUE",
         OP_CLOSE_UPVALUE = 30 => "OP_CLOSE_UPVALUE",
+        OP_CLASS = 31 => "OP_CLASS",
+        OP_SET_PROPERTY = 32 => "OP_SET_PROPERTY",
+        OP_GET_PROPERTY = 33 => "OP_GET_PROPERTY",
     }
 }

@@ -7,6 +7,7 @@ use crate::{
     ObjString,
 };
 
+#[repr(C)]
 pub struct Table {
     count: usize,
     capacity: usize,
@@ -14,6 +15,7 @@ pub struct Table {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[repr(C)]
 pub struct Entry {
     key: *mut ObjString,
     value: Value,
@@ -320,11 +322,5 @@ impl Table {
 
     pub fn capacity(&self) -> usize {
         self.capacity
-    }
-}
-
-impl Drop for Table {
-    fn drop(&mut self) {
-        self.free();
     }
 }

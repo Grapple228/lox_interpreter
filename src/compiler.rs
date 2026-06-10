@@ -51,8 +51,8 @@ const RULES: [ParseRule; 43] = [
     }, // COMMA
     ParseRule {
         prefix: None,
-        infix: None,
-        precedence: Precedence::NONE,
+        infix: Some(Compiler::dot),
+        precedence: Precedence::CALL,
     }, // DOT
     ParseRule {
         prefix: Some(Compiler::unary),
@@ -558,6 +558,18 @@ impl Compiler {
         self.parse_precedence(Precedence::ASSIGNMENT);
     }
 
+    fn dot(&mut self, can_assign: bool) {
+        self.consume(TokenType::IDENTIFIER, "Expect property name after '.'.");
+        let name = self.identifier_constant(get_parser().previous);
+
+        if can_assign && self.matches(TokenType::EQUAL) {
+            self.expression();
+            self.emit_bytes(OpCode::OP_SET_PROPERTY as u8, name as u8);
+        } else {
+            self.emit_bytes(OpCode::OP_GET_PROPERTY as u8, name as u8);
+        }
+    }
+
     fn binary(&mut self, _can_assign: bool) {
         let operator_type = get_parser().previous.typ;
         let rule = get_rule(operator_type);
@@ -757,7 +769,9 @@ impl Compiler {
     }
 
     fn declaration(&mut self) {
-        if self.matches(TokenType::FUN) {
+        if self.matches(TokenType::CLASS) {
+            self.class_declaration();
+        } else if self.matches(TokenType::FUN) {
             self.fun_declaration();
         } else if self.matches(TokenType::VAR) {
             self.var_declaration();
@@ -768,6 +782,17 @@ impl Compiler {
         if get_parser().panic_mode {
             self.synchronize();
         }
+    }
+
+    fn class_declaration(&mut self) {
+        let class_name = self.parse_variable("Expect class name.");
+
+        self.emit_bytes(OpCode::OP_CLASS as u8, class_name as u8);
+
+        self.define_variable(class_name);
+
+        self.consume(TokenType::LEFT_BRACE, "Expect '{' before class body.");
+        self.consume(TokenType::RIGHT_BRACE, "Expect '}' after class body.");
     }
 
     fn fun_declaration(&mut self) {
