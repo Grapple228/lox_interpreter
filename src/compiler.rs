@@ -1,5 +1,5 @@
 use crate::{
-    common::{Chunk, DynamicArray, OpCode, Stack, Table, Value},
+    common::{utils::memcmp, Chunk, DynamicArray, OpCode, Stack, Table, Value},
     object::{FunctionType, Obj, ObjClosure, ObjUpValue},
     parser::get_parser,
     precedence::Precedence,
@@ -200,7 +200,7 @@ const RULES: [ParseRule; 43] = [
         precedence: Precedence::NONE,
     }, // SUPER
     ParseRule {
-        prefix: None,
+        prefix: Some(Compiler::this),
         infix: None,
         precedence: Precedence::NONE,
     }, // THIS
@@ -342,6 +342,10 @@ impl UpValue {
     }
 }
 
+pub struct Class {
+    enclosing: *mut Class,
+}
+
 pub struct Compiler {
     vm: *mut Vm,
     vars_cache: Table,
@@ -358,10 +362,16 @@ pub struct Compiler {
     typ: FunctionType,
 
     pub(crate) enclosing: *mut Compiler,
+    pub(crate) class: *mut Class,
 }
 
 impl Compiler {
-    pub fn new(vm: *mut Vm, typ: FunctionType, enclosing: *mut Compiler) -> Box<Self> {
+    pub fn new(
+        vm: *mut Vm,
+        typ: FunctionType,
+        enclosing: *mut Compiler,
+        class: *mut Class,
+    ) -> Box<Self> {
         let mut compiler = Box::new(Self {
             vars_cache: Table::new(),
 
@@ -377,6 +387,7 @@ impl Compiler {
             vm,
 
             enclosing,
+            class,
         });
 
         if typ != FunctionType::Script {
@@ -387,9 +398,19 @@ impl Compiler {
             };
         }
 
-        compiler.locals[0].depth = Some(0);
-        compiler.locals[0].name.start = "".as_ptr();
-        compiler.locals[0].name.length = 0;
+        let local = &mut compiler.locals[0];
+
+        local.depth = Some(0);
+        local.is_captured = false;
+
+        if typ != FunctionType::Function {
+            local.name.start = "this".as_ptr();
+            local.name.length = 4;
+        } else {
+            local.name.start = "".as_ptr();
+            local.name.length = 0;
+        }
+
         compiler.local_count = 1;
 
         compiler
@@ -482,7 +503,12 @@ impl Compiler {
     }
 
     fn emit_return(&mut self) {
-        self.emit_byte(OpCode::OP_NIL as u8);
+        if self.typ == FunctionType::Initializer {
+            self.emit_bytes(OpCode::OP_GET_LOCAL as u8, 0);
+        } else {
+            self.emit_byte(OpCode::OP_NIL as u8);
+        }
+
         self.emit_byte(OpCode::OP_RETURN as u8);
     }
 
@@ -784,6 +810,26 @@ impl Compiler {
         }
     }
 
+    fn method(&mut self) {
+        self.consume(TokenType::IDENTIFIER, "Expect method name.");
+
+        let class_name = get_parser().previous;
+        let constant = self.identifier_constant(get_parser().previous);
+
+        let mut typ = FunctionType::Method;
+
+        let parser = get_parser();
+        if parser.previous.length == 4
+            && unsafe { memcmp(parser.previous.start, "init".as_ptr(), 4) == 0 }
+        {
+            typ = FunctionType::Initializer
+        }
+
+        self.function(typ);
+
+        self.emit_bytes(OpCode::OP_METHOD as u8, constant as u8);
+    }
+
     fn class_declaration(&mut self) {
         let class_name = self.parse_variable("Expect class name.");
 
@@ -791,8 +837,24 @@ impl Compiler {
 
         self.define_variable(class_name);
 
+        let mut class = Class {
+            enclosing: self.class,
+        };
+
+        self.class = &mut class;
+
+        self.named_variable(get_parser().previous, false);
+
         self.consume(TokenType::LEFT_BRACE, "Expect '{' before class body.");
+
+        while !self.check(TokenType::RIGHT_BRACE) && !self.check(TokenType::EOF) {
+            self.method();
+        }
+
         self.consume(TokenType::RIGHT_BRACE, "Expect '}' after class body.");
+        self.emit_byte(OpCode::OP_POP as u8);
+
+        self.class = unsafe { (*self.class).enclosing };
     }
 
     fn fun_declaration(&mut self) {
@@ -800,6 +862,15 @@ impl Compiler {
         self.mark_initialized();
         self.function(FunctionType::Function);
         self.define_variable(global);
+    }
+
+    fn this(&mut self, can_assign: bool) {
+        if self.class.is_null() {
+            self.error("Can't use 'this' outside of a class.");
+            return;
+        }
+
+        self.variable(false);
     }
 
     fn call(&mut self, _can_assign: bool) {
@@ -832,7 +903,7 @@ impl Compiler {
     }
 
     fn function(&mut self, typ: FunctionType) {
-        let mut compiler = Compiler::new(self.vm, typ, &mut *self as *mut Compiler);
+        let mut compiler = Compiler::new(self.vm, typ, &mut *self as *mut Compiler, self.class);
         compiler.begin_scope();
 
         compiler.consume(TokenType::LEFT_PAREN, "Expect '(' after function name.");
@@ -866,7 +937,7 @@ impl Compiler {
         let upvalue_count = unsafe { (*function).upvalue_count };
 
         // Определяем closure или обычная функция
-        if upvalue_count > 0 {
+        if upvalue_count > 0 || typ == FunctionType::Method || typ == FunctionType::Initializer {
             self.emit_bytes(OpCode::OP_CLOSURE as u8, constant as u8);
             for i in 0..upvalue_count {
                 self.emit_byte(if compiler.upvalues[i].is_local { 1 } else { 0 });
@@ -1059,6 +1130,10 @@ impl Compiler {
         if self.matches(TokenType::SEMICOLON) {
             self.emit_return();
         } else {
+            if self.typ == FunctionType::Initializer {
+                self.error("Can't return a value from an initializer");
+            }
+
             self.expression();
             self.consume(TokenType::SEMICOLON, "Expect ';' after return value.");
             self.emit_byte(OpCode::OP_RETURN as u8);

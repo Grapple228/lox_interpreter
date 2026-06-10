@@ -1,9 +1,14 @@
-use crate::{common::Value, vm::Vm, Obj, ObjString, ObjType};
+use crate::{
+    common::{Table, Value},
+    vm::Vm,
+    Obj, ObjString, ObjType,
+};
 
 #[repr(C)]
 pub struct ObjClass {
     pub(super) obj: Obj,
     pub name: *const ObjString,
+    pub methods: Table,
 }
 
 impl ObjClass {
@@ -17,6 +22,7 @@ impl ObjClass {
 
         unsafe {
             (*ptr).name = name;
+            (*ptr).methods = Table::new();
         }
 
         ptr

@@ -15,6 +15,7 @@ fn main() -> Result<()> {
     }
 
     let mut vm = Vm::new();
+    vm.init();
 
     let args: Vec<String> = args().collect();
 
@@ -49,8 +50,6 @@ fn run_file(vm: &mut Vm, filename: &str) -> Result<()> {
     let source_cstring = std::ffi::CString::new(source).unwrap();
     let source_ptr = source_cstring.as_ptr() as *const u8;
 
-    vm.reset();
-
     match vm.interpret(source_ptr) {
         InterpretResult::Ok => (),
         InterpretResult::CompileError => exit(65),
@@ -66,8 +65,6 @@ fn repl(vm: &mut Vm) -> Result<()> {
     let mut line = String::new();
 
     _ = writeln!(stdout, "Lox interpleter in REPL mode");
-
-    vm.reset();
 
     loop {
         _ = write!(stdout, "> ");

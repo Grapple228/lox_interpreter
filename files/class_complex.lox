@@ -1,0 +1,137 @@
+// Класс для термоса с кофе
+class Thermos {
+  init(capacity) {
+    this.capacity = capacity;
+    this.amount = 0;
+    this.temperature = 20;
+    this.isOpen = false;
+  }
+
+  fill(coffeeAmount, temp) {
+    if (coffeeAmount <= 0) {
+      print "Can't fill with negative amount";
+      return false;
+    }
+
+    var spaceLeft = this.capacity - this.amount;
+    if (coffeeAmount > spaceLeft) {
+      print "Thermos will overflow! Only added " + spaceLeft;
+      this.amount = this.capacity;
+    } else {
+      this.amount = this.amount + coffeeAmount;
+    }
+
+    // Средняя температура при смешивании
+    this.temperature = (this.temperature + temp) / 2;
+    print "Filled with coffee. Now: " + this.amount + "/" + this.capacity;
+    return true;
+  }
+
+  pour(cups) {
+    if (!this.isOpen) {
+      print "Can't pour - thermos is closed!";
+      return 0;
+    }
+
+    var cupSize = 50;
+    var needed = cups * cupSize;
+
+    if (needed > this.amount) {
+      print "Not enough coffee! Only poured " + (this.amount / cupSize);
+      var poured = this.amount;
+      this.amount = 0;
+      return poured;
+    }
+
+    this.amount = this.amount - needed;
+    print "Poured " + cups + " cups (" + needed + " ml)";
+    return needed;
+  }
+
+  open() {
+    this.isOpen = true;
+    print "Thermos opened";
+  }
+
+  close() {
+    this.isOpen = false;
+    print "Thermos closed";
+  }
+
+  heat(minutes) {
+    var heatPerMinute = 5;
+    this.temperature = this.temperature + minutes * heatPerMinute;
+    if (this.temperature > 90) {
+      this.temperature = 90;
+      print "Coffee is boiling hot! Be careful!";
+    }
+    print "Temperature is now " + this.temperature + "°C";
+  }
+
+  cool(minutes) {
+    var coolPerMinute = 2;
+    this.temperature = this.temperature - minutes * coolPerMinute;
+    if (this.temperature < 10) {
+      this.temperature = 10;
+      print "Coffee is getting cold!";
+    }
+    print "Temperature is now " + this.temperature + "°C";
+  }
+
+  drink(sips) {
+    var sipSize = 10;
+    var drinkAmount = sips * sipSize;
+
+    if (drinkAmount > this.amount) {
+      print "Only " + (this.amount / sipSize) + " sips available";
+      drinkAmount = this.amount;
+    }
+
+    if (this.temperature > 70) {
+      print "Hot! Let it cool first!";
+      return 0;
+    }
+
+    this.amount = this.amount - drinkAmount;
+    print "Drank " + sips + " sips. Remaining: " + this.amount + " ml";
+    return drinkAmount;
+  }
+
+  status() {
+    print "=== Thermos Status ===";
+    print "Amount: " + this.amount + "/" + this.capacity + " ml";
+    print "Temperature: " + this.temperature + "°C";
+    print "Open: " + this.isOpen;
+    print "Can pour: " + (this.isOpen and this.amount > 0);
+  }
+}
+
+// Демонстрация
+print "=== Creating 500ml thermos ===";
+var therm = Thermos(500);
+therm.status();
+
+print "\n=== Filling with hot coffee ===";
+therm.fill(300, 85);
+therm.status();
+
+print "\n=== Trying to pour while closed ===";
+therm.pour(2);
+
+print "\n=== Opening and pouring ===";
+therm.open();
+therm.pour(2);
+
+print "\n=== Drinking without cooling ===";
+therm.drink(3);
+
+print "\n=== Cooling down ===";
+therm.cool(5);
+therm.drink(3);
+
+print "\n=== Heating up ===";
+therm.heat(4);
+therm.fill(100, 90);
+
+print "\n=== Final status ===";
+therm.status();

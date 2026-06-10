@@ -2,8 +2,8 @@ use crate::{
     common::{OpCode, Stack, Table, Value},
     compiler::{CallFrame, Callee, Compiler},
     object::{
-        FunctionType, NativeFn, NativeResult, ObjClass, ObjClosure, ObjInstance, ObjNative,
-        ObjUpValue,
+        FunctionType, NativeFn, NativeResult, ObjBoundMethod, ObjClass, ObjClosure, ObjInstance,
+        ObjNative, ObjUpValue,
     },
     Obj, ObjFunction, ObjString, ObjType,
 };
@@ -12,6 +12,7 @@ mod gc;
 mod natives;
 
 pub use gc::Gc;
+use tracing::warn;
 
 pub const FRAMES_MAX: usize = 64;
 pub const STACK_MAX: usize = FRAMES_MAX * 256;
@@ -56,6 +57,7 @@ pub struct Vm {
     pub next_gc: usize,
 
     pub is_compiling: bool,
+    pub init_string: *mut ObjString,
 }
 
 impl Vm {
@@ -84,10 +86,13 @@ impl Vm {
             next_gc: 1024 * 1024,
 
             is_compiling: false,
+            init_string: std::ptr::null_mut(),
         }
     }
 
     pub fn init(&mut self) {
+        self.init_string = ObjString::copy(self, "init".as_ptr(), 4);
+
         self.init_natives();
     }
 
@@ -120,9 +125,9 @@ impl Vm {
         self.next_gc = 1024 * 1024;
         self.is_compiling = false;
         self.current = std::ptr::null_mut();
+        self.init_string = std::ptr::null_mut();
 
-        // Инициализируем natives заново
-        self.init_natives();
+        self.init();
     }
 
     fn init_natives(&mut self) {
@@ -267,13 +272,45 @@ impl Vm {
     fn call_value(&mut self, callee: Value, arg_count: usize) -> bool {
         if callee.is_obj() {
             match unsafe { (*callee.as_obj()).typ() } {
+                ObjType::BoundMethod => {
+                    let bound = callee.as_bound_method();
+                    if bound.is_null() {
+                        self.runtime_error("Bound method is null.");
+                        return false;
+                    }
+                    let pos = self.stack.len() - arg_count - 1;
+                    self.stack.set(pos, unsafe { (*bound).receiver });
+
+                    let method = unsafe { (*bound).method };
+                    if method.is_null() {
+                        self.runtime_error("Bound method's method is null.");
+                        return false;
+                    }
+
+                    return self.call_closure(method, arg_count);
+                }
+
                 ObjType::Class => {
                     let class = callee.as_class();
-
                     let instance = ObjInstance::allocate(self, class);
                     let pos = self.stack.len() - arg_count - 1;
                     self.stack.set(pos, Value::Obj(instance as *mut Obj));
 
+                    let mut initializer = Value::Nil;
+
+                    if unsafe { (*class).methods.get(self.init_string, &mut initializer) } {
+                        if initializer.is_closure() {
+                            return self.call_closure(initializer.as_closure(), arg_count);
+                        }
+                    }
+
+                    // Если init нет, проверяем что нет аргументов
+                    if arg_count != 0 {
+                        self.runtime_error(&format!("Expected 0 arguments but got {}", arg_count));
+                        return false;
+                    }
+
+                    // Удаляем аргументы (их нет) и оставляем instance
                     return true;
                 }
 
@@ -379,6 +416,15 @@ impl Vm {
         }
     }
 
+    fn define_method(&mut self, name: *mut ObjString) {
+        let method = *self.stack.peek(0);
+        let class = self.stack.peek(1).as_class();
+        unsafe {
+            (*class).methods.set(name, method);
+        }
+        self.stack.pop();
+    }
+
     fn run(&mut self) -> InterpretResult {
         let mut frame_ptr = unsafe { self.frames.as_mut_ptr().add(self.frame_count - 1) };
 
@@ -402,6 +448,15 @@ impl Vm {
             };
 
             match op {
+                OpCode::OP_METHOD => {
+                    let Some(name_str) = self.read_string(unsafe { &mut *frame_ptr }) else {
+                        self.runtime_error("Method name must be a string.");
+                        return InterpretResult::RuntimeError;
+                    };
+
+                    self.define_method(name_str);
+                }
+
                 OpCode::OP_GET_PROPERTY => {
                     let value = self.stack.peek(0);
                     if !value.is_instance() {
@@ -417,10 +472,29 @@ impl Vm {
 
                     let mut field_value: Value = Value::Nil;
 
-                    unsafe { &(*instance).fields }.get(name_str, &mut field_value);
+                    // Проверяем поле
+                    if unsafe { &(*instance).fields }.get(name_str, &mut field_value) {
+                        self.stack.pop(); // Instance
+                        self.stack.push(field_value);
+                        continue;
+                    }
 
-                    self.stack.pop(); // Instance
-                    self.stack.push(field_value);
+                    // Поля нет - проверяем метод
+                    let mut method = Value::Nil;
+                    if unsafe { &(*(*instance).class).methods }.get(name_str, &mut method) {
+                        let bound = ObjBoundMethod::allocate(
+                            self,
+                            *self.stack.peek(0),
+                            method.as_closure(),
+                        );
+                        self.stack.pop();
+                        self.stack.push(Value::Obj(bound as *mut Obj));
+                        continue;
+                    }
+
+                    // Ни поля, ни метода - возвращаем nil
+                    self.stack.pop();
+                    self.stack.push(Value::Nil);
                 }
 
                 OpCode::OP_SET_PROPERTY => {
@@ -780,8 +854,12 @@ impl Vm {
     pub fn interpret(&mut self, source: *const u8) -> InterpretResult {
         self.is_compiling = true;
 
-        let mut compiler =
-            Compiler::new(self as *mut Vm, FunctionType::Script, std::ptr::null_mut());
+        let mut compiler = Compiler::new(
+            self as *mut Vm,
+            FunctionType::Script,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        );
 
         self.current = &mut *compiler;
 

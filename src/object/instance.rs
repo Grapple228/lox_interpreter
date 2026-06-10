@@ -5,6 +5,13 @@ use crate::{
     Obj, ObjType,
 };
 
+/*
+ * TODO: Add instance[index] for access to runtime generated fields
+ * var field_name = "hello";
+ * instance[field_name] = "world";
+ * print instance[field_name]; // "world"
+*/
+
 #[repr(C)]
 pub struct ObjInstance {
     pub(super) obj: Obj,

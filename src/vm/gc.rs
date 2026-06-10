@@ -1,6 +1,6 @@
 use crate::{
     common::{utils, DynamicArray, Table, Value},
-    object::{ObjClass, ObjClosure, ObjInstance, ObjUpValue},
+    object::{ObjBoundMethod, ObjClass, ObjClosure, ObjInstance, ObjUpValue},
     vm::Vm,
     Obj, ObjFunction,
 };
@@ -95,6 +95,7 @@ impl Gc {
         let globals = &mut vm.globals as *mut Table;
         Self::mark_table(vm, globals);
         Self::mark_compiler_roots(vm);
+        Self::mark_obj(vm, vm.init_string as *mut Obj);
     }
 
     fn mark_compiler_roots(vm: &mut Vm) {
@@ -158,11 +159,17 @@ impl Gc {
                 crate::ObjType::Class => {
                     let class = object as *mut ObjClass;
                     Self::mark_obj(vm, (*class).name as *mut Obj);
+                    Self::mark_table(vm, &mut (*class).methods);
                 }
                 crate::ObjType::Instance => {
                     let instance = object as *mut ObjInstance;
                     Self::mark_obj(vm, (*instance).class as *mut Obj);
                     Self::mark_table(vm, &mut (*instance).fields);
+                }
+                crate::ObjType::BoundMethod => {
+                    let bound_method = object as *mut ObjBoundMethod;
+                    Self::mark_value(vm, (*bound_method).receiver);
+                    Self::mark_obj(vm, (*bound_method).method as *mut Obj);
                 }
             }
         }

@@ -297,10 +297,11 @@ impl Table {
                     }
                 } else {
                     println!(
-                        "  [{}]: key={:?} (hash={})",
+                        "  [{}]: key={:?} (hash={}) addr={:p}",
                         i,
                         unsafe { (&*entry.key).as_str() },
-                        unsafe { (*entry.key).hash() }
+                        unsafe { (*entry.key).hash() },
+                        unsafe { entry.key }
                     );
                 }
             }

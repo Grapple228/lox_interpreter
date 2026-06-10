@@ -9,6 +9,8 @@ use crate::{
 pub enum FunctionType {
     Function = 0,
     Script = 1,
+    Method = 2,
+    Initializer = 3,
 }
 
 #[repr(C)]
