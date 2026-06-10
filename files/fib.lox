@@ -16,15 +16,17 @@ fun fib_iter(n) {
     return a;
 }
 
-var count = 40;
+var count = 20;
 
 var start = clock();
-var result = fib_iter(count);
+var result1 = fib_iter(count);
 var elapsed = clock() - start;
-print fib_iter + " with result " + result + " took " + elapsed;
+print fib_iter + " with result " + result1 + " took " + elapsed;
 
 
 var start = clock();
-var result = fib_rec(count);
+var result2 = fib_rec(count);
 var elapsed = clock() - start;
-print fib_rec + "  with result " + result + " took " + elapsed;
+print fib_rec + "  with result " + result2 + " took " + elapsed;
+
+print "same results: " + (result1 == result2);
