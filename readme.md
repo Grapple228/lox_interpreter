@@ -1,7 +1,8 @@
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Build](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
-[![Progress](https://img.shields.io/badge/Lox-85%25-yellow.svg)]()
+[![Progress](https://img.shields.io/badge/Lox-93%25-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-22%2F22-brightgreen.svg)]()
 
 # Lox Interpreter
 
@@ -37,6 +38,8 @@ This project follows the implementation from Robert Nystrom's excellent book, wi
 
 ### Core Language
 - **Variables** - Mutable variables with `var` keyword
+- **Classes** - Object-oriented programming with methods and fields
+- **Inheritance** - Single inheritance with `super` keyword
 - **Control Flow** - `if`/`else` conditional statements
 - **Loops** - `while` and `for` loops with `break` and `continue`
 - **Functions** - First-class functions with closures
@@ -65,9 +68,9 @@ This project follows the implementation from Robert Nystrom's excellent book, wi
 ## Plans for future
 
 ### Short term (Next 1-2 months)
-- [ ] **Classes and Objects** - OOP support with methods, fields, and constructors
-- [ ] **Inheritance** - Single inheritance with `super` keyword
-- [ ] **Method resolution** - Proper method lookup chain
+- [x] **Classes and Objects** - OOP support with methods, fields, and constructors
+- [x] **Inheritance** - Single inheritance with `super` keyword
+- [x] **Method resolution** - Proper method lookup chain
 - [ ] **Full long constant support** - Allow to declare more than 256 consts
 ### Mid term (3-6 months)
 - [ ] **Arrays** - List data structure with index access and built-in methods
@@ -97,7 +100,7 @@ lox = { git = "https://github.com/Grapple228/lox_interpreter" }
 
 Or clone and build locally:
 ```sh
-git clone https://github.com/yourusername/lox_interpreter
+git clone https://github.com/Grapple228/lox_interpreter
 cd lox_interpreter
 cargo build --release
 ```
@@ -119,9 +122,28 @@ Run with debug messages
 RUST_LOG=debug cargo run -- script.lox
 ```
 
+## Test Suite
+
+The interpreter passes **22 comprehensive tests** covering:
+- Basic language features (variables, loops, conditionals)
+- Functions and closures
+- Classes, inheritance, and method overriding
+- Garbage collection and memory management
+- Native functions
+
+Run all tests:
+```sh
+./run_tests.sh
+```
+
+Run all tests and save result to `./bench_results/result-{TIMESTAMP}.log`:
+```sh
+./run_tests.sh --save
+```
+
 ## Examples
 Fibonacci (Recursive)
-```rust
+```lox
 fun fib_rec(n) {
     if (n < 2) return n;
     return fib_rec(n - 1) + fib_rec(n - 2);
@@ -131,7 +153,7 @@ print fib_rec(20);
 ```
 
 Fibonacci (Iterative)
-```rust
+```lox
 fun fib_iter(n) {
     var a = 0;
     var b = 1;
@@ -149,7 +171,7 @@ print fib_iter(20);
 ```
 
 Closures
-```rust
+```lox
 fun makeCounter() {
     var count = 0;
     fun counter() {
@@ -165,7 +187,7 @@ print counter();  // 2
 ```
 
 String concatenation with type coercion
-```rust
+```lox
 var greeting = "Hello";
 var name = "World";
 print greeting + " " + name;  // "Hello World"
@@ -175,7 +197,7 @@ print true + " is true";        // "true is true"
 ```
 
 Loops with break and continue
-```rust
+```lox
 for (var i = 0; i < 10; i = i + 1) {
     if (i % 2 == 0) continue;
     if (i > 7) break;
@@ -184,13 +206,35 @@ for (var i = 0; i < 10; i = i + 1) {
 ```
 
 Native functions
-```rust
+```lox
 var start = clock();
 // ... do work ...
 print "Took: " + (clock() - start);
 
 print random(1, 100);  // Random number between 1 and 100
 print square(12);      // 144
+```
+
+Classes and Inheritance
+```lox
+class Animal {
+  init(name) {
+    this.name = name;
+  }
+  
+  speak() {
+    print this.name + " makes a sound";
+  }
+}
+
+class Dog < Animal {
+  speak() {
+    print this.name + " barks! Woof!";
+  }
+}
+
+var dog = Dog("Rex");
+dog.speak();  // "Rex barks! Woof!"
 ```
 
 ## Implementation Details
@@ -222,7 +266,6 @@ The interpreter consists of four main components:
 
 ## Limitations
 
-- No classes or inheritance (coming soon)
 - No array or map data structures
 - No exception handling
 - Single-threaded execution only

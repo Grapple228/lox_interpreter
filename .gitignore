@@ -11,6 +11,8 @@ _*
 *.lockb
 *.log
 
+!bench_results/*.log
+
 # -- Rust
 target/
 # !Cargo.lock # commented by default

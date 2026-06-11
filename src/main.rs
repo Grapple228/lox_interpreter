@@ -1,17 +1,13 @@
+use lox::vm::{InterpretResult, Vm};
 use std::{
     env::args,
     io::{stdin, stdout, Write},
     process::exit,
 };
 
-use lox::{
-    vm::{InterpretResult, Vm},
-    Result,
-};
-
-fn main() -> Result<()> {
+fn main() {
     if cfg!(debug_assertions) {
-        lox::init()?;
+        lox::init();
     }
 
     let mut vm = Vm::new();
@@ -29,7 +25,7 @@ fn main() -> Result<()> {
     }
 }
 
-fn run_file(vm: &mut Vm, filename: &str) -> Result<()> {
+fn run_file(vm: &mut Vm, filename: &str) {
     use std::fs::File;
     use std::io::Read;
 
@@ -55,11 +51,9 @@ fn run_file(vm: &mut Vm, filename: &str) -> Result<()> {
         InterpretResult::CompileError => exit(65),
         InterpretResult::RuntimeError => exit(70),
     }
-
-    Ok(())
 }
 
-fn repl(vm: &mut Vm) -> Result<()> {
+fn repl(vm: &mut Vm) {
     let stdin = stdin();
     let mut stdout = stdout();
     let mut line = String::new();
@@ -86,6 +80,4 @@ fn repl(vm: &mut Vm) -> Result<()> {
 
         line.clear();
     }
-
-    Ok(())
 }

@@ -1,0 +1,34 @@
+=========================================
+Lox Interpreter Test Results
+Date: 2026-06-11 19:10:27
+=========================================
+
+class.lox                     ... PASSED (2.130 ms)
+class_bench.lox               ... PASSED (941.877 ms)
+class_bench_book.lox          ... PASSED (20003.797 ms)
+class_complex.lox             ... PASSED (2.512 ms)
+class_complex_inheritance.lox ... PASSED (2.874 ms)
+class_inheritance.lox         ... PASSED (2.215 ms)
+class_init_bench.lox          ... PASSED (784.737 ms)
+class_methods.lox             ... PASSED (2.556 ms)
+closure.lox                   ... PASSED (2.892 ms)
+complex.lox                   ... PASSED (3.232 ms)
+fib.lox                       ... PASSED (3.385 ms)
+func.lox                      ... PASSED (3.103 ms)
+gc.lox                        ... PASSED (961.88 ms)
+if.lox                        ... PASSED (2.75 ms)
+large_loop.lox                ... PASSED (8496.770 ms)
+local.lox                     ... PASSED (1.838 ms)
+loop.lox                      ... PASSED (2.792 ms)
+main.lox                      ... PASSED (2.437 ms)
+natives.lox                   ... PASSED (1.976 ms)
+print.lox                     ... PASSED (2.108 ms)
+to_string.lox                 ... PASSED (2.531 ms)
+variables.lox                 ... PASSED (2.78 ms)
+
+=========================================
+Passed: 22
+Failed: 0
+Total:  22
+Total time: 31220 ms (avg: 1419 ms)
+=========================================
