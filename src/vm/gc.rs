@@ -148,8 +148,10 @@ impl Gc {
                     Self::mark_obj(vm, (*function).name as *mut Obj);
                     Self::mark_array(vm, &(*(*function).chunk()).constants)
                 }
+
                 crate::ObjType::Closure => {
                     let closure = object as *mut ObjClosure;
+
                     Self::mark_obj(vm, (*closure).function as *mut Obj);
 
                     for i in 0..(*closure).upvalue_count {

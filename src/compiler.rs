@@ -195,7 +195,7 @@ const RULES: [ParseRule; 43] = [
         precedence: Precedence::NONE,
     }, // RETURN
     ParseRule {
-        prefix: None,
+        prefix: Some(Compiler::_super),
         infix: None,
         precedence: Precedence::NONE,
     }, // SUPER
@@ -344,6 +344,7 @@ impl UpValue {
 
 pub struct Class {
     enclosing: *mut Class,
+    has_superclass: bool,
 }
 
 pub struct Compiler {
@@ -584,6 +585,31 @@ impl Compiler {
         self.parse_precedence(Precedence::ASSIGNMENT);
     }
 
+    fn _super(&mut self, _can_assign: bool) {
+        if self.class.is_null() {
+            self.error("Can't use 'super' outside of a class.");
+        } else if unsafe { !(*self.class).has_superclass } {
+            self.error("Can't use 'super' in a class with no superclass.");
+        }
+
+        self.consume(TokenType::DOT, "Expect '.' after 'super'");
+        self.consume(TokenType::IDENTIFIER, "Expect superclass method name.");
+
+        let name = self.identifier_constant(get_parser().previous);
+
+        self.named_variable(Self::synthetic_token("this"), false);
+
+        if self.matches(TokenType::LEFT_PAREN) {
+            let arg_count = self.argument_list();
+            self.named_variable(Self::synthetic_token("super"), false);
+            self.emit_bytes(OpCode::OP_SUPER_INVOKE as u8, name as u8);
+            self.emit_byte(arg_count as u8);
+        } else {
+            self.named_variable(Self::synthetic_token("super"), false);
+            self.emit_bytes(OpCode::OP_GET_SUPER as u8, name as u8);
+        }
+    }
+
     fn dot(&mut self, can_assign: bool) {
         self.consume(TokenType::IDENTIFIER, "Expect property name after '.'.");
         let name = self.identifier_constant(get_parser().previous);
@@ -817,7 +843,6 @@ impl Compiler {
     fn method(&mut self) {
         self.consume(TokenType::IDENTIFIER, "Expect method name.");
 
-        let class_name = get_parser().previous;
         let constant = self.identifier_constant(get_parser().previous);
 
         let mut typ = FunctionType::Method;
@@ -834,6 +859,15 @@ impl Compiler {
         self.emit_bytes(OpCode::OP_METHOD as u8, constant as u8);
     }
 
+    fn synthetic_token(text: &'static str) -> Token {
+        let mut token = Token::empty();
+
+        token.start = text.as_ptr();
+        token.length = text.len();
+
+        token
+    }
+
     fn class_declaration(&mut self) {
         let class_name = self.parse_variable("Expect class name.");
 
@@ -843,11 +877,31 @@ impl Compiler {
 
         let mut class = Class {
             enclosing: self.class,
+            has_superclass: false,
         };
 
         self.class = &mut class;
 
-        self.named_variable(get_parser().previous, false);
+        let name_token = get_parser().previous;
+
+        if self.matches(TokenType::LESS) {
+            self.consume(TokenType::IDENTIFIER, "Expect superclass name");
+            self.variable(false);
+
+            if Self::identifiers_equal(name_token, get_parser().previous) {
+                self.error("A class can't inherit from itself.");
+            }
+
+            self.begin_scope();
+            self.add_local(Self::synthetic_token("super"));
+            self.define_variable(0);
+
+            self.named_variable(name_token, false);
+            self.emit_byte(OpCode::OP_INHERIT as u8);
+            class.has_superclass = true;
+        }
+
+        self.named_variable(name_token, false);
 
         self.consume(TokenType::LEFT_BRACE, "Expect '{' before class body.");
 
@@ -857,6 +911,10 @@ impl Compiler {
 
         self.consume(TokenType::RIGHT_BRACE, "Expect '}' after class body.");
         self.emit_byte(OpCode::OP_POP as u8);
+
+        if class.has_superclass {
+            self.end_scope();
+        }
 
         self.class = unsafe { (*self.class).enclosing };
     }
@@ -868,7 +926,7 @@ impl Compiler {
         self.define_variable(global);
     }
 
-    fn this(&mut self, can_assign: bool) {
+    fn this(&mut self, _can_assign: bool) {
         if self.class.is_null() {
             self.error("Can't use 'this' outside of a class.");
             return;

@@ -1,0 +1,333 @@
+// complex_class_test.lox
+// Комплексный тест всех возможностей классов
+
+// ========== 1. Базовый класс с полями и методами ==========
+class Person {
+  init(name, age) {
+    this.name = name;
+    this.age = age;
+  }
+
+  introduce() {
+    print "Hi, I'm " + this.name + ", " + this.age + " years old";
+  }
+
+  haveBirthday() {
+    this.age = this.age + 1;
+    print "Happy birthday " + this.name + "! Now " + this.age;
+  }
+
+  getAge() {
+    return this.age;
+  }
+
+  getName() {
+    return this.name;
+  }
+
+  isAdult() {
+    return this.age >= 18;
+  }
+
+  setName(newName) {
+    this.name = newName;
+  }
+}
+
+// ========== 2. Наследование с переопределением методов ==========
+class Student < Person {
+  init(name, age, studentId) {
+    super.init(name, age);
+    this.studentId = studentId;
+    this.hasScholarship = false;
+    this.gradesSum = 0;
+    this.gradesCount = 0;
+  }
+
+  introduce() {
+    super.introduce();
+    print "I'm a student, ID: " + this.studentId;
+    if (this.hasScholarship) {
+      print "I have a scholarship!";
+    }
+    if (this.gradesCount > 0) {
+      print "My GPA: " + (this.gradesSum / this.gradesCount);
+    }
+  }
+
+  grantScholarship() {
+    if (this.hasScholarship) {
+      print this.name + " already has a scholarship";
+      return false;
+    }
+    this.hasScholarship = true;
+    print "Scholarship granted to " + this.name;
+    return true;
+  }
+
+  revokeScholarship() {
+    if (!this.hasScholarship) {
+      print this.name + " has no scholarship to revoke";
+      return false;
+    }
+    this.hasScholarship = false;
+    print "Scholarship revoked from " + this.name;
+    return true;
+  }
+
+  addGrade(grade) {
+    this.gradesSum = this.gradesSum + grade;
+    this.gradesCount = this.gradesCount + 1;
+    print this.name + " got grade: " + grade;
+  }
+
+  getGPA() {
+    if (this.gradesCount == 0) return 0;
+    return this.gradesSum / this.gradesCount;
+  }
+}
+
+// ========== 3. Цепочка наследования ==========
+class GradStudent < Student {
+  init(name, age, studentId, advisor) {
+    super.init(name, age, studentId);
+    this.advisor = advisor;
+    this.hasThesis = false;
+    this.thesisTitle = "";
+    this.publications = 0;
+  }
+
+  introduce() {
+    super.introduce();
+    print "I'm a grad student, advisor: " + this.advisor;
+    if (this.hasThesis) {
+      print "My thesis: " + this.thesisTitle;
+    }
+    print "Publications: " + this.publications;
+  }
+
+  setThesis(title) {
+    this.thesisTitle = title;
+    this.hasThesis = true;
+    print this.name + "'s thesis: " + title;
+  }
+
+  defendThesis() {
+    if (!this.hasThesis) {
+      print this.name + " has no thesis to defend";
+      return false;
+    }
+    print this.name + " defended the thesis successfully!";
+    this.grantScholarship();
+    this.publish();
+    return true;
+  }
+
+  publish() {
+    this.publications = this.publications + 1;
+    print this.name + " published a paper! Total: " + this.publications;
+  }
+}
+
+// ========== 4. Банковский счет ==========
+class BankAccount {
+  init(owner) {
+    this.owner = owner;
+    this.balance = 0;
+    this.transactionCount = 0;
+  }
+
+  deposit(amount) {
+    if (amount <= 0) {
+      print "Invalid amount";
+      return false;
+    }
+    this.balance = this.balance + amount;
+    this.transactionCount = this.transactionCount + 1;
+    print this.owner + " deposited " + amount + ", balance: " + this.balance;
+    return true;
+  }
+
+  withdraw(amount) {
+    if (amount <= 0) {
+      print "Invalid amount";
+      return false;
+    }
+    if (amount > this.balance) {
+      print "Insufficient funds! Balance: " + this.balance;
+      return false;
+    }
+    this.balance = this.balance - amount;
+    this.transactionCount = this.transactionCount + 1;
+    print this.owner + " withdrew " + amount + ", balance: " + this.balance;
+    return true;
+  }
+
+  getBalance() {
+    return this.balance;
+  }
+
+  getTransactionCount() {
+    return this.transactionCount;
+  }
+
+  transferTo(target, amount) {
+    if (this.withdraw(amount)) {
+      target.deposit(amount);
+      print "Transfer " + amount + " from " + this.owner + " to " + target.owner;
+      return true;
+    }
+    return false;
+  }
+}
+
+// ========== 5. Сберегательный счет ==========
+class SavingsAccount < BankAccount {
+  init(owner, interestRate) {
+    super.init(owner);
+    this.interestRate = interestRate;
+    this.minBalance = 100;
+  }
+
+  withdraw(amount) {
+    if (this.balance - amount < this.minBalance) {
+      print "Cannot withdraw: need minimum " + this.minBalance;
+      return false;
+    }
+    return super.withdraw(amount);
+  }
+
+  addInterest() {
+    var interest = this.balance * this.interestRate / 100;
+    this.balance = this.balance + interest;
+    print "Added " + interest + " interest. New balance: " + this.balance;
+  }
+}
+
+// ========== 6. Класс с автоинкрементом ID ==========
+var nextId = 1;
+
+class Identifiable {
+  init() {
+    this.id = nextId;
+    nextId = nextId + 1;
+  }
+
+  getId() {
+    return this.id;
+  }
+}
+
+class Product < Identifiable {
+  init(name, price) {
+    super.init();
+    this.name = name;
+    this.price = price;
+    this.inStock = true;
+  }
+
+  info() {
+    print "#" + this.getId() + ": " + this.name + " - $" + this.price;
+  }
+
+  sell() {
+    if (this.inStock) {
+      this.inStock = false;
+      print "Sold: " + this.name;
+      return true;
+    }
+    print this.name + " is out of stock!";
+    return false;
+  }
+
+  restock() {
+    this.inStock = true;
+    print "Restocked: " + this.name;
+  }
+
+  applyDiscount(percent) {
+    this.price = this.price - (this.price * percent / 100);
+    print this.name + " now costs $" + this.price;
+  }
+}
+
+// ========== ТЕСТЫ ==========
+
+print "=== TEST 1: Basic Person ===";
+var alice = Person("Alice", 25);
+alice.introduce();
+alice.haveBirthday();
+alice.introduce();
+print "";
+
+print "=== TEST 2: Student ===";
+var bob = Student("Bob", 20, "S123");
+bob.introduce();
+bob.addGrade(85);
+bob.addGrade(92);
+bob.addGrade(78);
+print "Bob's GPA: " + bob.getGPA();
+bob.grantScholarship();
+bob.introduce();
+print "";
+
+print "=== TEST 3: GradStudent ===";
+var carol = GradStudent("Carol", 28, "G456", "Dr. Smith");
+carol.introduce();
+carol.setThesis("Compiler Optimization");
+carol.publish();
+carol.publish();
+carol.defendThesis();
+carol.introduce();
+print "";
+
+print "=== TEST 4: Bank Accounts ===";
+var acc1 = BankAccount("Alice");
+acc1.deposit(500);
+acc1.withdraw(200);
+print "Balance: " + acc1.getBalance();
+print "Transactions: " + acc1.getTransactionCount();
+print "";
+
+print "=== TEST 5: Savings Account ===";
+var save = SavingsAccount("Bob", 10);
+save.deposit(1000);
+save.withdraw(850); // 1000-850=150 >=100 OK
+save.addInterest();
+print "Final: " + save.getBalance();
+print "";
+
+print "=== TEST 6: Transfer ===";
+var from = BankAccount("Alice");
+var to = BankAccount("Bob");
+from.deposit(1000);
+to.deposit(100);
+from.transferTo(to, 300);
+print "Alice: " + from.getBalance();
+print "Bob: " + to.getBalance();
+print "";
+
+print "=== TEST 7: Products ===";
+var apple = Product("Apple", 1);
+var banana = Product("Banana", 0.5);
+apple.info();
+banana.info();
+apple.sell();
+apple.sell(); // out of stock
+apple.restock();
+apple.sell();
+apple.applyDiscount(20);
+apple.info();
+print "";
+
+print "=== TEST 8: Polymorphism ===";
+var alicePerson = Person("Alice", 25);
+var bobStudent = Student("Bob", 22, "S789");
+var carolGrad = GradStudent("Carol", 29, "G999", "Dr. Wilson");
+
+alicePerson.introduce();
+bobStudent.introduce();
+carolGrad.introduce();
+print "";
+
+print "=== ALL TESTS PASSED ===";

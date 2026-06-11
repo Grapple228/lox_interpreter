@@ -115,6 +115,7 @@ impl Chunk {
             OpCode::OP_GET_PROPERTY => self.constant_instruction(op_code, offset),
             OpCode::OP_SET_PROPERTY => self.constant_instruction(op_code, offset),
             OpCode::OP_METHOD => self.constant_instruction(op_code, offset),
+            OpCode::OP_GET_SUPER => self.constant_instruction(op_code, offset),
 
             OpCode::OP_SET_LOCAL => self.byte_instruction(op_code, offset),
             OpCode::OP_GET_LOCAL => self.byte_instruction(op_code, offset),
@@ -127,6 +128,7 @@ impl Chunk {
             OpCode::OP_LOOP => self.jump_instruction(op_code, -1, offset),
 
             OpCode::OP_INVOKE => self.invoke_instruction(op_code, offset),
+            OpCode::OP_SUPER_INVOKE => self.invoke_instruction(op_code, offset),
 
             OpCode::OP_CLOSURE => {
                 let mut offset = offset + 1;

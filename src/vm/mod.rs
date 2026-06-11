@@ -12,7 +12,6 @@ mod gc;
 mod natives;
 
 pub use gc::Gc;
-use tracing::warn;
 
 pub const FRAMES_MAX: usize = 64;
 pub const STACK_MAX: usize = FRAMES_MAX * 256;
@@ -438,6 +437,17 @@ impl Vm {
     ) -> bool {
         let mut method = Value::Nil;
 
+        if name == self.init_string {
+            let init_method = unsafe { (*class).init_method };
+
+            if !init_method.is_null() {
+                return self.call_closure(init_method, arg_count);
+            }
+            let name = unsafe { (*name).as_str() };
+            self.runtime_error(&format!("Undefined property '{}'.", name));
+            return false;
+        }
+
         if unsafe { !(*class).methods.get(name, &mut method) } {
             let name = unsafe { (*name).as_str() };
             self.runtime_error(&format!("Undefined property '{}'.", name));
@@ -467,6 +477,20 @@ impl Vm {
         self.invoke_from_class(unsafe { (*instance).class }, name, arg_count)
     }
 
+    #[inline(always)]
+    fn bind_method(&mut self, class: *mut ObjClass, name: *mut ObjString) -> bool {
+        let mut method = Value::Nil;
+        if unsafe { &(*class).methods }.get(name, &mut method) {
+            let bound = ObjBoundMethod::allocate(self, *self.stack.peek(0), method.as_closure());
+            self.stack.pop();
+            self.stack.push(Value::Obj(bound as *mut Obj));
+
+            return true;
+        }
+
+        false
+    }
+
     fn run(&mut self) -> InterpretResult {
         let mut frame_ptr = unsafe { self.frames.as_mut_ptr().add(self.frame_count - 1) };
 
@@ -490,6 +514,52 @@ impl Vm {
             };
 
             match op {
+                OpCode::OP_GET_SUPER => {
+                    let Some(name) = self.read_string(unsafe { &mut *frame_ptr }) else {
+                        self.runtime_error("super must be a string.");
+                        return InterpretResult::RuntimeError;
+                    };
+                    let superclass = self.stack.pop().as_class();
+
+                    if !self.bind_method(superclass, name) {
+                        return InterpretResult::RuntimeError;
+                    }
+                }
+
+                OpCode::OP_INHERIT => {
+                    let superclass = self.stack.peek(1);
+
+                    if !superclass.is_class() {
+                        self.runtime_error("Superclass must be a class.");
+                        return InterpretResult::RuntimeError;
+                    }
+                    let subclass = self.stack.peek(0).as_class();
+                    unsafe {
+                        (*subclass)
+                            .methods
+                            .add_all(&(*superclass.as_class()).methods);
+                        (*subclass).init_method = (*superclass.as_class()).init_method;
+                    }
+                    self.stack.pop();
+                }
+
+                OpCode::OP_SUPER_INVOKE => {
+                    let Some(method) = self.read_string(unsafe { &mut *frame_ptr }) else {
+                        self.runtime_error("Method name must be a string.");
+                        return InterpretResult::RuntimeError;
+                    };
+
+                    let frame = unsafe { &mut *frame_ptr };
+                    let arg_count = Self::read_byte(frame) as usize;
+
+                    let superclass = self.stack.pop().as_class();
+                    if !self.invoke_from_class(superclass, method, arg_count) {
+                        return InterpretResult::RuntimeError;
+                    }
+
+                    frame_ptr = unsafe { self.frames.as_mut_ptr().add(self.frame_count - 1) };
+                }
+
                 OpCode::OP_INVOKE => {
                     let Some(method) = self.read_string(unsafe { &mut *frame_ptr }) else {
                         self.runtime_error("Method name must be a string.");
@@ -497,7 +567,6 @@ impl Vm {
                     };
 
                     let frame = unsafe { &mut *frame_ptr };
-
                     let arg_count = Self::read_byte(frame) as usize;
 
                     if !self.invoke(method, arg_count) {
@@ -539,15 +608,7 @@ impl Vm {
                     }
 
                     // Поля нет - проверяем метод
-                    let mut method = Value::Nil;
-                    if unsafe { &(*(*instance).class).methods }.get(name_str, &mut method) {
-                        let bound = ObjBoundMethod::allocate(
-                            self,
-                            *self.stack.peek(0),
-                            method.as_closure(),
-                        );
-                        self.stack.pop();
-                        self.stack.push(Value::Obj(bound as *mut Obj));
+                    if unsafe { self.bind_method((*instance).class, name_str) } {
                         continue;
                     }
 

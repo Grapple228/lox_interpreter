@@ -10,7 +10,7 @@ repository = "https://github.com/grapple228/lox_interpreter.git"
 
 [lints.rust]
 # unsafe_code = "forbid"
-unused = { level = "allow", priority = -1 } # For exploratory dev.
+# unused = { level = "allow", priority = -1 } # For exploratory dev.
 
 [dependencies]
 rand = "0.10.1"
@@ -27,11 +27,9 @@ strip = true           # удалить debug-символы
 lto = true             # link-time optimization
 # opt-level = "z"        # оптимизация на размер
 codegen-units = 1      # больше оптимизаций
-panic = "abort"
 
 [profile.bench]
 strip = true           # удалить debug-символы
 lto = true             # link-time optimization
-opt-level = "z"        # оптимизация на размер
+# opt-level = "z"        # оптимизация на размер
 codegen-units = 1      # больше оптимизаций
-panic = "abort"

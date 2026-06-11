@@ -1,0 +1,44 @@
+class ClassA {
+  cook() {
+    print "Class A";
+  }
+
+  a() {
+    print "a inner";
+  }
+}
+
+class ClassB < ClassA {
+  cook() {
+    print "Class B";
+  }
+
+  b() {
+    print "b inner";
+  }
+}
+
+class ClassC < ClassB {
+  cook() {
+    print "Class C";
+  }
+
+  c() {
+    print "c inner";
+  }
+}
+
+var class_a = ClassA();
+class_a.cook();
+class_a.a();
+
+var class_b = ClassB();
+class_b.cook();
+class_b.a();
+class_b.b();
+
+var class_c = ClassC();
+class_c.cook();
+class_c.a();
+class_c.b();
+class_c.c();

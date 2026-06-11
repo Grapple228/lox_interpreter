@@ -12,6 +12,8 @@ PASSED=0
 FAILED=0
 TOTAL_TIME=0
 
+cargo build --release --quiet
+
 echo "========================================="
 echo "Running Lox interpreter tests"
 echo "========================================="
@@ -43,22 +45,27 @@ for file in ./files/*.lox; do
         # Выравнивание
         printf "Testing %-${MAX_LEN}s ... " "$filename"
 
-        # Запускаем интерпретатор в release режиме с замером времени
+        # Запускаем интерпретатор с замером времени
         start_time=$(date +%s%N)
-        output=$(cargo run -r -- "$file" 2>&1)
+        output=$(target/release/lox "$file" 2>&1)
         exit_code=$?
         end_time=$(date +%s%N)
 
-        duration=$(( ($end_time - $start_time) / 1000000 )) # milliseconds
+        duration_ns=$((end_time - start_time))
+        duration_ms=$((duration_ns / 1000000))
+        duration_us=$((duration_ns / 1000 - duration_ms * 1000))
 
-        TOTAL_TIME=$((TOTAL_TIME + duration))
+        TOTAL_TIME=$((TOTAL_TIME + duration_ms))
+
+        # Всегда показываем ms и μs
+        time_str="${duration_ms}.${duration_us} ms"
 
         # Проверяем статус выполнения
         if [ $exit_code -eq 0 ]; then
-            printf "${GREEN}PASSED${NC} (%d ms)\n" "$duration"
+            printf "${GREEN}PASSED${NC} (%s)\n" "$time_str"
             PASSED=$((PASSED + 1))
         else
-            printf "${RED}FAILED${NC} (%d ms)\n" "$duration"
+            printf "${RED}FAILED${NC} (%s)\n" "$time_str"
             echo "----------------------------------------"
             echo "Error output from $filename:"
             echo "$output"
